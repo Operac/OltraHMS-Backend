@@ -33,7 +33,7 @@ const httpServer = createServer(app);
 // Socket.io Setup
 const io: any = new Server(httpServer, {
     cors: {
-        origin: "http://localhost:5173", // Frontend URL
+        origin: process.env.FRONTEND_URL || "http://localhost:5173", // Frontend URL
         methods: ["GET", "POST"]
     }
 });
@@ -42,7 +42,10 @@ setupSocketHandlers(io);
 
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true
+}));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
