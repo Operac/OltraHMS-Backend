@@ -33,3 +33,7 @@ verify_output.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Prisma seed script
+prisma/seed.ts
+prisma/seed-telemedicine.ts
