@@ -31,7 +31,7 @@ export const getInventoryStatus = async (req: AuthRequest, res: Response) => {
         res.json(formatted);
     } catch (error) {
         console.error("Error fetching inventory:", error);
-        res.status(500).json({ message: 'Failed to fetch inventory' });
+        res.status(500).json({ message: 'Failed to fetch inventory', error: String(error) });
     }
 };
 
@@ -99,6 +99,49 @@ export const getLowStockAlerts = async (req: AuthRequest, res: Response) => {
 
         res.json(lowStock);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch alerts' });
+        res.status(500).json({ message: 'Failed to fetch alerts', error: String(error) });
+    }
+};
+
+/**
+ * Create a new Medication (Admin Only)
+ */
+export const createMedication = async (req: AuthRequest, res: Response) => {
+    try {
+        const { 
+            name, genericName, category, dosageForm, 
+            strength, manufacturer, price, reorderLevel, 
+            isControlledSubstance 
+        } = req.body;
+
+        const medication = await prisma.medication.create({
+            data: {
+                name,
+                genericName,
+                category,
+                dosageForm,
+                strength,
+                manufacturer,
+                price: Number(price),
+                reorderLevel: Number(reorderLevel),
+                isControlledSubstance: Boolean(isControlledSubstance)
+            }
+        });
+
+        // Log audit
+        await prisma.auditLog.create({
+            data: {
+                userId: req.user?.id,
+                action: 'CREATE_MEDICATION',
+                entityType: 'Medication',
+                entityId: medication.id,
+                details: `Created medication ${name}`
+            }
+        });
+
+        res.status(201).json(medication);
+    } catch (error) {
+        console.error("Error creating medication:", error);
+        res.status(500).json({ message: 'Failed to create medication', error: String(error) });
     }
 };

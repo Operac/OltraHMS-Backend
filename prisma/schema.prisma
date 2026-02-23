@@ -218,8 +218,10 @@ model User {
   notifications   Notification[]
   refreshTokens   RefreshToken[]
   paymentsProcessed Payment[]    @relation("ProcessedBy")
+  sentMessages    Message[]      @relation("SentMessages")
   admissionsCreated Admission[]  @relation("AdmittedBy")
   triages         Triage[]       // Nurses performing triage (if User is Nurse)
+  recordedExpenses Expense[]
   
   // NOTE: In a real app, many relations might link to User/Staff. 
   // We'll link mainly through Staff/Patient specific tables where possible.
@@ -277,6 +279,10 @@ model Patient {
   // New Features
   wellnessGoals       WellnessGoal[]
   feedbacks           Feedback[]
+  radiologyRequests   RadiologyRequest[] @relation("PatientRadiology")
+  surgeries           SurgeryCase[]      @relation("PatientSurgeries")
+  medicationAdministrations MedicationAdministration[]
+  fluidBalances       FluidBalance[]
   
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
@@ -302,6 +308,43 @@ model PatientInsurance {
   updatedAt       DateTime @updatedAt
 }
 
+model Referral {
+  id              String         @id @default(uuid())
+  medicalRecordId String
+  medicalRecord   MedicalRecord  @relation(fields: [medicalRecordId], references: [id])
+  serviceName     String         // e.g. "MRI Scan"
+  notes           String?
+  referredTo      String?        // Hospital/Lab name
+  createdAt       DateTime       @default(now())
+}
+
+model Service {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., "Malaria Test", "General Consultation"
+  code        String?  // e.g., "LAB-001"
+  type        ServiceType // LAB, CONSULTATION, PROCEDURE
+  price       Float
+  isExternal  Boolean  @default(false)
+  departmentId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
+
+
+model Expense {
+  id          String   @id @default(uuid())
+  description String
+  amount      Float
+  category    String   // "SALARY", "UTILITIES", "INVENTORY", "OTHER"
+  incurredAt  DateTime @default(now())
+  recordedById String
+  recordedBy   User    @relation(fields: [recordedById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model Feedback {
   id            String   @id @default(uuid())
   patientId     String
@@ -324,6 +367,7 @@ model Staff {
   
   staffNumber      String           @unique
   departmentId     String?
+  department       Department? @relation(fields: [departmentId], references: [id])
   specialization   String?
   qualification    String?
   licenseNumber    String?
@@ -336,9 +380,41 @@ model Staff {
   dispensedMeds      Dispensing[] // As pharmacist
   uploadedLabResults LabResult[]    @relation("UploadedBy")
   feedback           Feedback[]
-  
+  managedDepartments Department[]   @relation("HeadOfDepartment")
+  administeredMeds   MedicationAdministration[]
+  conductedRounds    WardRound[]
+  recordedFluids     FluidBalance[]
+  payrolls           Payroll[]
+  leaveRequests      LeaveRequest[]
+  approvedLeaves     LeaveRequest[]   @relation("LeaveApprover")
+
+  // HR Details
+  baseSalary         Float?
+  bankDetails        Json?            // { bankName, accountNumber, accountName }
+  emergencyContact   Json?            // { name, relation, phone }
+  leaveBalances      StaffLeaveBalance[]
+
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
+  
+  // Radiology
+  doctorRadiologyRequests RadiologyRequest[] @relation("DoctorRequests")
+  radiologistReports      RadiologyReport[]  @relation("RadiologistReports")
+  surgeriesLead           SurgeryCase[]      @relation("LeadSurgeon")
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  
+  headOfDeptId String?
+  headOfDept   Staff?  @relation("HeadOfDepartment", fields: [headOfDeptId], references: [id])
+  
+  staff        Staff[]
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Appointment {
@@ -391,6 +467,7 @@ model MedicalRecord {
   prescriptions   Prescription[]
   labOrders       LabOrder[]
   invoice         Invoice?
+  referrals       Referral[]
   
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -417,6 +494,7 @@ model Prescription {
   
   // Relations
   dispensing      Dispensing?
+  administrations MedicationAdministration[]
   
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -488,6 +566,7 @@ model Invoice {
   balance       Float
   
   status        InvoiceStatus @default(DRAFT)
+  type          String        @default("STANDARD") // STANDARD, DEPOSIT
   
   // Relations
   payments      Payment[]
@@ -634,6 +713,8 @@ model Admission {
   
   reason        String
   status        String    // ADMITTED, DISCHARGED
+  wardRounds    WardRound[]
+  fluidBalances FluidBalance[]
 }
 
 model Bed {
@@ -643,6 +724,7 @@ model Bed {
   
   number        String
   type          String?
+  price         Float?    // Specific price for this bed (overrides ward basePrice)
   status        BedStatus @default(VACANT_CLEAN)
   
   // Relations
@@ -654,6 +736,7 @@ model Ward {
   name          String
   type          String    // GENERAL, ICU, MATERNITY
   capacity      Int
+  basePrice     Float     @default(50.0) // Base price if bed doesn't specify one
   beds          Bed[]
 }
 
@@ -730,16 +813,265 @@ model MedicationLog {
   takenAt        DateTime @default(now())
 }
 
+
 model WellnessGoal {
   id          String   @id @default(uuid())
   patientId   String
   patient     Patient  @relation(fields: [patientId], references: [id])
+  
   description String
-  status      String   // "IN_PROGRESS", "COMPLETED"
+  category    String   // "Nutrition", "Fitness", "Mental", "Medication", "General"
+  
+  // Progress & Habit Tracking
+  frequency   String   @default("DAILY") // DAILY, WEEKLY, ONCE
+  targetValue Int      @default(1)       // e.g. 8 (glasses)
+  currentValue Int     @default(0)       // e.g. 3
+  unit        String?  // "glasses", "steps", "mins"
+  
+  streak      Int      @default(0)
+  lastCheckedIn DateTime?
+  
+  status      String   @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
   targetDate  DateTime?
+  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// ----------------------------------------------------------------------
+// INPATIENT & NURSE MODULES
+// ----------------------------------------------------------------------
+
+model MedicationAdministration {
+  id              String       @id @default(uuid())
+  prescriptionId  String
+  prescription    Prescription @relation(fields: [prescriptionId], references: [id])
+  patientId       String
+  patient         Patient      @relation(fields: [patientId], references: [id])
+  
+  scheduledTime   DateTime
+  administeredTime DateTime?
+  
+  status          String       // PENDING, GIVEN, MISSED, REFUSED
+  
+  administeredById String?
+  administeredBy   Staff?      @relation(fields: [administeredById], references: [id])
+  
+  notes           String?
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model WardRound {
+  id           String    @id @default(uuid())
+  admissionId  String
+  admission    Admission @relation(fields: [admissionId], references: [id])
+  
+  notes        String    // SOAP format or free text
+  
+  conductedById String
+  conductedBy   Staff     @relation(fields: [conductedById], references: [id])
+  
+  roundTime    DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model FluidBalance {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  admissionId String?
+  admission   Admission? @relation(fields: [admissionId], references: [id])
+  
+  type        String   // INTAKE, OUTPUT
+  fluidType   String   // "Normal Saline", "Urine", etc.
+  amount      Float    // in ml
+  
+  recordedAt  DateTime @default(now())
+  recordedById String
+  recordedBy   Staff    @relation(fields: [recordedById], references: [id])
+}
+
+// ----------------------------------------------------------------------
+// HR & PAYROLL MODULES
+// ----------------------------------------------------------------------
+
+model Payroll {
+  id          String   @id @default(uuid())
+  staffId     String
+  staff       Staff    @relation(fields: [staffId], references: [id])
+  
+  month       String   // e.g., "January"
+  year        Int      // e.g., 2024
+  
+  baseSalary  Float
+  bonuses     Float    @default(0)
+  deductions  Float    @default(0)
+  tax         Float    @default(0)
+  netSalary   Float
+  
+  status      String   // PENDING, PAID
+  paymentDate DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([staffId, month, year]) // Prevent duplicate payrolls for same month
+}
+
+model LeaveType {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., "Annual Leave", "Sick Leave"
+  defaultDays Int      @default(0) // Default days allocated globally
+  isPaid      Boolean  @default(true)
+  
+  requests    LeaveRequest[]
+  balances    StaffLeaveBalance[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StaffLeaveBalance {
+  id             String    @id @default(uuid())
+  staffId        String
+  staff          Staff     @relation(fields: [staffId], references: [id])
+  leaveTypeId    String
+  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id])
+  
+  allocatedDays  Int       @default(0) // Overrideable per staff
+  usedDays       Int       @default(0)
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  
+  @@unique([staffId, leaveTypeId]) // Each staff has exactly one balance record per leave type
+}
+
+model LeaveRequest {
+  id          String   @id @default(uuid())
+  staffId     String
+  staff       Staff    @relation(fields: [staffId], references: [id])
+  
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+  
+  startDate   DateTime
+  endDate     DateTime
+  days        Int
+  reason      String
+  
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  
+  approvedById String?
+  approvedBy   Staff?   @relation("LeaveApprover", fields: [approvedById], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Radiology Models
+model RadiologyTest {
+  id          String   @id @default(uuid())
+  name        String   // e.g., "Chest X-Ray", "Brain MRI"
+  code        String   @unique // e.g., "XR-C-001"
+  price       Float
+  modality    String   // XRAY, CT, MRI, ULTRASOUND
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  requests    RadiologyRequest[]
+}
+
+model RadiologyRequest {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation("PatientRadiology", fields: [patientId], references: [id])
+  doctorId    String
+  doctor      Staff    @relation("DoctorRequests", fields: [doctorId], references: [id])
+  testId      String
+  test        RadiologyTest @relation(fields: [testId], references: [id])
+  
+  status      String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+  priority    String   @default("ROUTINE") // ROUTINE, URGENT, STAT
+  notes       String?
+  
+  report      RadiologyReport?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model RadiologyReport {
+  id          String   @id @default(uuid())
+  requestId   String   @unique
+  request     RadiologyRequest @relation(fields: [requestId], references: [id])
+  
+  radiologistId String
+  radiologist Staff    @relation("RadiologistReports", fields: [radiologistId], references: [id])
+  
+  findings    String
+  impression  String
+  imageUrls   String[] // Array of URLs from Cloudinary
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Surgery & OT Models
+model OperatingTheater {
+  id          String   @id @default(uuid())
+  name        String   // e.g., "OT 1", "Emergency OT"
+  type        String   // GENERAL, CARDIAC, ORTHO
+  status      String   @default("AVAILABLE") // AVAILABLE, MAINTENANCE, IN_USE
+  equipment   Json?    // Array of equipment IDs or names
+  
+  cases       SurgeryCase[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SurgeryCase {
+  id              String   @id @default(uuid())
+  patientId       String
+  patient         Patient  @relation("PatientSurgeries", fields: [patientId], references: [id])
+  
+  leadSurgeonId   String
+  leadSurgeon     Staff    @relation("LeadSurgeon", fields: [leadSurgeonId], references: [id])
+  
+  theaterId       String
+  theater         OperatingTheater @relation(fields: [theaterId], references: [id])
+  
+  scheduledStart  DateTime
+  scheduledEnd    DateTime
+  
+  status          String   @default("SCHEDULED") // SCHEDULED, IN_PROGRESS, RECOVERY, COMPLETED, CANCELLED
+  priority        String   @default("ELECTIVE") // ELECTIVE, EMERGENCY
+  
+  preOpDiagnosis  String?
+  postOpDiagnosis String?
+  notes           String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Chat System
+model Message {
+  id          String   @id @default(uuid())
+  content     String
+  
+  senderId    String
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id])
+  
+  channel     String   // "general", "doctors", "nurses"
+  
+  createdAt   DateTime @default(now())
+}
+
 
 
 

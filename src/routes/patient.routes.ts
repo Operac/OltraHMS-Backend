@@ -1,25 +1,26 @@
 import { Router } from 'express';
-import { createPatient, getPatients, getPatientById, getDashboardStats, getPatientProfile, updatePatientProfile } from '../controllers/patient.controller';
+import { createPatient, getPatients, getPatientById, getDashboardStats, getPatientProfile, updatePatientProfile, getMedicationSchedule } from '../controllers/patient.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { Role } from '@prisma/client';
 
 const router = Router();
 
 // Protect routes
-router.use(authenticate);
+router.use(authenticate as any);
 
 // Dashboard for Patient
-router.get('/dashboard', authorize([Role.PATIENT]), getDashboardStats);
-router.get('/profile/me', authorize([Role.PATIENT]), getPatientProfile);
-router.patch('/profile', authorize([Role.PATIENT]), updatePatientProfile);
+router.get('/dashboard', authorize([Role.PATIENT]) as any, getDashboardStats as any);
+router.get('/profile/me', authorize([Role.PATIENT]) as any, getPatientProfile as any);
+router.patch('/profile', authorize([Role.PATIENT]) as any, updatePatientProfile as any);
+router.get('/medications', authorize([Role.PATIENT]) as any, getMedicationSchedule as any);
 
 // List/Search: All staff
-router.get('/', authorize([Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.RECEPTIONIST, Role.LAB_TECH, Role.PHARMACIST]), getPatients);
+router.get('/', authorize([Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.RECEPTIONIST]) as any, getPatients as any);
 
 // Create: Admin, Receptionist, Doctor, Nurse
-router.post('/', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR, Role.NURSE]), createPatient);
+router.post('/', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR, Role.NURSE]) as any, createPatient as any);
 
 // Details: All staff
-router.get('/:id', authorize([Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.RECEPTIONIST, Role.LAB_TECH, Role.PHARMACIST]), getPatientById);
+router.get('/:id', authorize([Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.RECEPTIONIST]) as any, getPatientById as any);
 
 export default router;

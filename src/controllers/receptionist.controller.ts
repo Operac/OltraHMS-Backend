@@ -2,8 +2,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Role, AppointmentStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // --- Appointments ---
 

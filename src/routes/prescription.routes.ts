@@ -4,13 +4,13 @@ import { getPrescriptions, getPrescriptionById, requestRefill, createPrescriptio
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate as any);
 
-router.get('/', authorize(['PATIENT', 'DOCTOR', 'ADMIN', 'PHARMACIST']), getPrescriptions);
-router.get('/:id', authorize(['PATIENT', 'DOCTOR', 'ADMIN', 'PHARMACIST']), getPrescriptionById);
-router.post('/', authorize(['DOCTOR', 'ADMIN']), createPrescription);
+router.get('/', authorize(['PATIENT', 'DOCTOR', 'ADMIN', 'PHARMACIST']) as any, getPrescriptions as any);
+router.get('/:id', authorize(['PATIENT', 'DOCTOR', 'ADMIN', 'PHARMACIST']) as any, getPrescriptionById as any);
+router.post('/', authorize(['DOCTOR', 'ADMIN']) as any, createPrescription as any);
 
 // Refill Request
-router.post('/:id/refill', authorize(['PATIENT', 'DOCTOR']), requestRefill);
+router.post('/:id/refill', authorize(['PATIENT', 'DOCTOR']) as any, requestRefill as any);
 
 export default router;

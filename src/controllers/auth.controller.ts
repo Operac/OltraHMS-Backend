@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { PrismaClient, Role, Status } from '@prisma/client';
+import { PrismaClient, Role, Status, Gender } from '@prisma/client';
 import { z } from 'zod';
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email.service';
 import { logAudit } from '../services/audit.service';
@@ -14,12 +14,14 @@ const registerSchema = z.object({
   password: z.string().min(8),
   firstName: z.string(),
   lastName: z.string(),
-  role: z.nativeEnum(Role).optional(),
+  phone: z.string().optional(),
+  gender: z.nativeEnum(Gender).optional(),
+  dateOfBirth: z.string().optional(), // Expecting ISO date string
 });
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { email, password, firstName, lastName, role } = registerSchema.parse(req.body);
+    const { email, password, firstName, lastName } = registerSchema.parse(req.body);
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -34,10 +36,41 @@ export const register = async (req: Request, res: Response) => {
         passwordHash: hashedPassword,
         firstName,
         lastName,
-        role: role || Role.PATIENT,
+        role: Role.PATIENT,
         status: Status.ACTIVE,
       },
     });
+
+    // Automatically create Patient profile if role is PATIENT
+    if (user.role === Role.PATIENT) {
+        if (!req.body.phone || !req.body.gender || !req.body.dateOfBirth) {
+             // In a real app, we might want to fail the whole transaction or require these fields.
+             // For now, let's try to create it, but if missing, we might have incomplete data.
+             // Let's rely on the schema or check here.
+        }
+
+        const patientNumber = `HMS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+        
+        await prisma.patient.create({
+            data: {
+                userId: user.id,
+                firstName: user.firstName || '',
+                lastName: user.lastName || '',
+                // email: user.email - Removed as not in Patient model
+                // Patient model in schema.prisma:
+                // id, userId, patientNumber, firstName, lastName, dateOfBirth, gender, phone, address...
+                // It does NOT have email directly, it relies on User.
+                // Wait, let me check schema again. 
+                // Line 235: model Patient { ... userId String @unique ... }
+                // It does NOT have email field in Patient model. OK.
+                
+                patientNumber,
+                dateOfBirth: new Date(req.body.dateOfBirth || new Date().toISOString()), // Fallback or throw? Zod checks?
+                gender: req.body.gender as Gender || Gender.OTHER,
+                phone: req.body.phone || '000-000-0000',
+            }
+        });
+    }
 
     await sendWelcomeEmail(user.email, user.firstName || 'User');
     await logAudit(user.id, 'USER_REGISTER', 'User registered successfully', req.ip || 'unknown');
@@ -51,6 +84,12 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
+    
+    // Hardened check to prevent Prisma crashing with 500 if inputs are malformed
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+        return res.status(400).json({ message: 'Email and password are required' });
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
@@ -118,11 +157,17 @@ export const login = async (req: Request, res: Response) => {
             email: user.email, 
             role: user.role, 
             firstName: user.firstName,
+            lastName: user.lastName,
             staffId: staff?.id 
+
         } 
     });
   } catch (error) {
-    res.status(500).json({ message: 'Login failed', error });
+    console.error('Login error details:', error);
+    res.status(500).json({ 
+        message: 'Login failed', 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+    });
   }
 };
 
@@ -143,7 +188,6 @@ export const resetPasswordRequest = async (req: Request, res: Response) => {
             data: { resetToken: token, resetTokenExpiry: new Date(Date.now() + 3600000) }
         });
 
-        await sendPasswordResetEmail(user.email, token);
         await sendPasswordResetEmail(user.email, token);
         res.json({ message: 'Password reset email sent' });
     } catch (error) {

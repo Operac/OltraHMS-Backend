@@ -5,10 +5,10 @@ import { getPatientInvoices, getInvoiceById, processPayment } from '../controlle
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate as any);
 
-router.get('/patient/me', authorize([Role.PATIENT]), getPatientInvoices);
-router.get('/:id', getInvoiceById);
-router.post('/pay', processPayment);
+router.get('/patient/me', authorize([Role.PATIENT]) as any, getPatientInvoices as any);
+router.get('/:id', getInvoiceById as any);
+router.post('/pay', processPayment as any);
 
 export default router;

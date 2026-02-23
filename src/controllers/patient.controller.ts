@@ -138,17 +138,20 @@ export const getPatients = async (req: Request, res: Response) => {
   }
 };
 
-export const getPatientById = async (req: Request, res: Response) => {
+export const getPatientById = async (req: AuthRequest, res: Response) => {
     try {
         const { id } = req.params;
         if (!id) return res.status(400).json({ message: 'Patient ID is required' });
+
+        const userRole = req.user?.role;
+        const includeClinicalData = ['DOCTOR', 'NURSE', 'ADMIN', 'PATIENT'].includes(userRole as string);
 
         const patient = await prisma.patient.findUnique({
             where: { id: id as string },
             include: {
                 user: { select: { email: true, status: true } },
                 appointments: { take: 5, orderBy: { appointmentDate: 'desc' } },
-                medicalRecords: { take: 5, orderBy: { visitDate: 'desc' } },
+                ...(includeClinicalData && { medicalRecords: { take: 5, orderBy: { visitDate: 'desc' } } }),
             }
         });
 
@@ -299,5 +302,47 @@ export const getPatientProfile = async (req: AuthRequest, res: Response) => {
         res.json({ ...patient, email: patient.user?.email });
     } catch (error) {
          res.status(500).json({ message: 'Failed to fetch profile' });
+    }
+};
+
+export const getMedicationSchedule = async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+        const patient = await prisma.patient.findFirst({ where: { userId }, select: { id: true } });
+        if (!patient) return res.status(404).json({ message: 'Patient profile not found' });
+
+        // Logic from getScheduledMedications
+        const targetDate = new Date(); // Defaults to today
+        const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
+        const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
+
+        const prescriptions = await prisma.prescription.findMany({
+            where: {
+                patientId: patient.id,
+                status: { in: ['PENDING', 'DISPENSED', 'REFILL_REQUESTED'] }
+            },
+            include: {
+                medicalRecord: { include: { doctor: { include: { user: true } } } }
+            }
+        });
+
+        const administrations = await prisma.medicationAdministration.findMany({
+             where: {
+                patientId: patient.id,
+                createdAt: {
+                    gte: startOfDay,
+                    lte: endOfDay
+                }
+            },
+            include: { administeredBy: { include: { user: true } } }
+        });
+
+        res.json({ prescriptions, administrations });
+
+    } catch (error) {
+        console.error("Medication Schedule Error:", error);
+        res.status(500).json({ message: 'Failed to fetch medication schedule', error });
     }
 };

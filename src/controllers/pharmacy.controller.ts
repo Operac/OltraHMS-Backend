@@ -24,6 +24,9 @@ export const getPendingPrescriptions = async (req: AuthRequest, res: Response) =
                     include: {
                         doctor: {
                             include: { user: { select: { lastName: true } } }
+                        },
+                        invoice: {
+                            select: { status: true, invoiceNumber: true }
                         }
                     }
                 }
@@ -72,6 +75,25 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
         const staffId = userWithStaff.staff.id;
 
         // Start Transaction to ensure atomicity
+        // Check validation
+        if (!process.env.SKIP_INVOICE_CHECK) {
+            // Check if there is a PAID invoice linked to this prescription/medicalRecord
+            // This logic assumes 1 invoice per prescription or medical record context
+            const invoice = await prisma.invoice.findFirst({
+                where: { 
+                    OR: [
+                        { medicalRecordId: prescription.medicalRecordId },
+                        // In future, link invoice directly to prescription items if needed
+                    ],
+                    status: 'PAID'
+                }
+            });
+
+            // NOTE: For now we warn or block based on config. 
+            // In strict mode, uncomment:
+            // if (!invoice) return res.status(402).json({ message: "Payment required before dispensing." });
+        }
+
         const result = await prisma.$transaction(async (tx) => {
             let totalCost = 0;
             const invoiceItems = [];
@@ -152,5 +174,117 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
     } catch (error: any) {
         console.error("Dispense Error:", error);
         res.status(400).json({ message: error.message || 'Dispensing failed' });
+    }
+};
+
+/**
+ * Get Dispensing Report
+ * Returns stats (Day/Week/Month) and recent history
+ */
+export const getDispensingReport = async (req: AuthRequest, res: Response) => {
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - 7);
+
+        const monthStart = new Date(today);
+        monthStart.setMonth(today.getMonth() - 1);
+
+        // Run queries in parallel
+        const [todayCount, weekCount, monthCount, history] = await Promise.all([
+            prisma.dispensing.count({
+                where: { dispensedAt: { gte: today } }
+            }),
+            prisma.dispensing.count({
+                where: { dispensedAt: { gte: weekStart } }
+            }),
+            prisma.dispensing.count({
+                where: { dispensedAt: { gte: monthStart } }
+            }),
+            prisma.dispensing.findMany({
+                take: 50,
+                orderBy: { dispensedAt: 'desc' },
+                include: {
+                    medication: { select: { name: true, category: true } },
+                    dispensedBy: { 
+                        include: { user: { select: { firstName: true, lastName: true } } } 
+                    },
+                    prescription: {
+                        include: {
+                            patient: { select: { firstName: true, lastName: true, patientNumber: true } },
+                            medicalRecord: {
+                                include: {
+                                    doctor: {
+                                        include: {
+                                            user: { select: { lastName: true } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        ]);
+
+        res.json({
+            stats: {
+                today: todayCount,
+                week: weekCount,
+                month: monthCount
+            },
+            history
+        });
+
+    } catch (error) {
+        console.error("Report Error:", error);
+        res.status(500).json({ message: 'Failed to fetch report' });
+    }
+};
+
+export const createInvoice = async (req: AuthRequest, res: Response) => {
+    try {
+        const { prescriptionId } = req.body;
+        
+        const prescription = await prisma.prescription.findUnique({
+            where: { id: prescriptionId },
+            include: { medicalRecord: true }
+        });
+
+        if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+
+        const medication = await prisma.medication.findFirst({ where: { name: prescription.medicationName } });
+        if (!medication) return res.status(404).json({ message: 'Medication not found in the catalog to determine price.' });
+        
+        const unitPrice = medication.price;
+        const totalLinePrice = prescription.quantity * unitPrice;
+
+        const invoice = await prisma.invoice.create({
+            data: {
+                invoiceNumber: `INV-RX-${Date.now()}`,
+                patientId: prescription.patientId,
+                medicalRecordId: prescription.medicalRecordId,
+                status: 'ISSUED',
+                items: [
+                    {
+                        description: `Medication: ${prescription.medicationName} (${prescription.quantity})`,
+                        quantity: prescription.quantity,
+                        unitPrice: unitPrice,
+                        total: totalLinePrice
+                    }
+                ],
+                subtotal: totalLinePrice,
+                tax: 0,
+                total: totalLinePrice,
+                balance: totalLinePrice
+            }
+        });
+
+        res.status(201).json(invoice);
+    } catch (error) {
+        console.error("Create Invoice Error:", error);
+        res.status(500).json({ message: 'Failed to create invoice' });
     }
 };

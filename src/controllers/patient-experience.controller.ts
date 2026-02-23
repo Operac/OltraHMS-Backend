@@ -151,17 +151,27 @@ export const updateWellnessGoal = async (req: AuthRequest, res: Response) => {
         
         if (id) {
             const updated = await prisma.wellnessGoal.update({
-                where: { id, patientId: patient.id },
-                data: { description, targetDate, status }
+                where: { id: String(id), patientId: patient.id },
+                data: { 
+                    description: String(description), 
+                    targetDate: targetDate ? new Date(targetDate) : null, 
+                    status: status ? String(status) : undefined 
+                }
             });
             return res.json(updated);
         } else {
             const created = await prisma.wellnessGoal.create({
                 data: {
                     patientId: patient.id,
-                    description,
+                    description: String(description),
+                    category: 'GENERAL', // default
+                    frequency: 'DAILY', // default
+                    targetValue: 1, // default
+                    unit: 'count', // default
+                    currentValue: 0,
+                    streak: 0,
                     targetDate: targetDate ? new Date(targetDate) : null,
-                    status: status || 'IN_PROGRESS'
+                    status: status ? String(status) : 'IN_PROGRESS'
                 }
             });
             return res.status(201).json(created);

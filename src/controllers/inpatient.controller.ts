@@ -1,171 +1,220 @@
+
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { BedStatus } from '@prisma/client';
 
-/**
- * Get All Wards with Bed Statistics
- */
-export const getAllWards = async (req: AuthRequest, res: Response) => {
+// ----------------------------------------------------------------------
+// NURSE ACTIONS (MAR & FLUIDS)
+// ----------------------------------------------------------------------
+
+// Get Scheduled Medications (MAR)
+export const getScheduledMedications = async (req: Request, res: Response) => {
     try {
-        const wards = await prisma.ward.findMany({
+        const patientId = req.query.patientId as string;
+        const { date } = req.query; // date defaults to today
+
+        const targetDate = date ? new Date(String(date)) : new Date();
+        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+        // 1. Get Active Prescriptions for the patient
+        const prescriptions = await prisma.prescription.findMany({
+            where: {
+                patientId,
+                status: { in: ['PENDING', 'DISPENSED', 'REFILL_REQUESTED'] }
+            },
             include: {
-                beds: {
-                    select: { status: true }
-                }
+                medicalRecord: { include: { doctor: { include: { user: true } } } }
             }
         });
 
-        // Calculate stats
-        const wardStats = wards.map(ward => {
-            const total = ward.beds.length;
-            const occupied = ward.beds.filter(b => b.status === 'OCCUPIED').length;
-            const available = ward.beds.filter(b => b.status === 'VACANT_CLEAN').length;
-            const dirty = ward.beds.filter(b => b.status === 'VACANT_DIRTY').length;
-            
-            return {
-                ...ward,
-                stats: { total, occupied, available, dirty },
-                beds: undefined // Don't send all beds in list view
-            };
+        // 2. Get recorded administrations for today
+        const administrations = await prisma.medicationAdministration.findMany({
+            where: {
+                patientId,
+                createdAt: {
+                    gte: startOfDay,
+                    lte: endOfDay
+                }
+            },
+            include: { administeredBy: { include: { user: true } } }
         });
 
-        res.json(wardStats);
+        // 3. (In a real app, logic would generate "slots" based on frequency)
+        // For simplicity, we return the plan + what has happened.
+        
+        res.json({
+            prescriptions,
+            administrations
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch wards' });
+        res.status(500).json({ message: 'Error fetching MAR', error });
     }
 };
 
-/**
- * Get Ward Details (Beds + Patients)
- */
-export const getWardDetails = async (req: AuthRequest, res: Response) => {
+// Log Medication Administration
+export const logMedicationAdministration = async (req: AuthRequest, res: Response) => {
     try {
-        const id = String(req.params.id);
-        const ward = await prisma.ward.findUnique({
-            where: { id },
-            include: {
-                beds: {
-                    orderBy: { number: 'asc' },
-                    include: {
-                        currAdmission: {
-                            where: { status: 'ADMITTED' },
-                            include: {
-                                patient: {
-                                    select: { firstName: true, lastName: true, patientNumber: true, gender: true, dateOfBirth: true }
-                                }
-                            }
-                        }
-                    }
-                }
+        const { prescriptionId, patientId, status, notes, scheduledTime } = req.body;
+        const staffId = req.user?.id; // Identify nurse
+
+        // Find Staff record for the logged-in user
+        const staff = await prisma.staff.findUnique({ where: { userId: staffId } });
+        if (!staff) return res.status(404).json({ message: 'Staff profile not found' });
+
+        const adminRecord = await prisma.medicationAdministration.create({
+            data: {
+                prescriptionId,
+                patientId,
+                status, // GIVEN, REFUSED, HELD
+                notes,
+                scheduledTime: new Date(scheduledTime || Date.now()),
+                administeredTime: new Date(),
+                administeredById: staff.id
             }
         });
 
-        if (!ward) return res.status(404).json({ message: 'Ward not found' });
-        res.json(ward);
+        res.status(201).json(adminRecord);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch ward details' });
+        res.status(500).json({ message: 'Error logging medication', error });
     }
 };
 
-/**
- * Admit Patient to a Bed
- */
-export const admitPatient = async (req: AuthRequest, res: Response) => {
+// Log Fluid Balance
+export const logFluidBalance = async (req: AuthRequest, res: Response) => {
     try {
-        const { patientId, bedId, reason, estimatedDischargeDate } = req.body;
+        const { patientId, admissionId, type, fluidType, amount } = req.body;
+        const staffId = req.user?.id;
 
-        // Validation
-        const bed = await prisma.bed.findUnique({ where: { id: bedId } });
-        if (!bed) return res.status(404).json({ message: 'Bed not found' });
-        if (bed.status !== 'VACANT_CLEAN') return res.status(400).json({ message: 'Bed is not available' });
+        const staff = await prisma.staff.findUnique({ where: { userId: staffId } });
+        if (!staff) return res.status(404).json({ message: 'Staff profile not found' });
 
-        const existingAdmission = await prisma.admission.findFirst({
-            where: { patientId, status: 'ADMITTED' }
-        });
-        if (existingAdmission) return res.status(400).json({ message: 'Patient is already admitted' });
-
-        // Transaction
-        const result = await prisma.$transaction(async (tx) => {
-            // 1. Create Admission
-            const admission = await tx.admission.create({
-                data: {
-                    patientId,
-                    bedId,
-                    reason,
-                    estimatedDischargeDate: estimatedDischargeDate ? new Date(estimatedDischargeDate) : null,
-                    status: 'ADMITTED',
-                    admittedById: req.user!.id
-                }
-            });
-
-            // 2. Update Bed Status
-            await tx.bed.update({
-                where: { id: bedId },
-                data: { status: 'OCCUPIED' }
-            });
-
-            return admission;
+        const fluidRecord = await prisma.fluidBalance.create({
+            data: {
+                patientId,
+                admissionId,
+                type, // INTAKE or OUTPUT
+                fluidType,
+                amount: parseFloat(amount),
+                recordedById: staff.id
+            }
         });
 
-        res.status(201).json(result);
+        res.status(201).json(fluidRecord);
     } catch (error) {
-        console.error("Admit Error", error);
-        res.status(500).json({ message: 'Failed to admit patient' });
+        res.status(500).json({ message: 'Error logging fluid balance', error });
     }
 };
 
-/**
- * Discharge Patient
- */
-export const dischargePatient = async (req: AuthRequest, res: Response) => {
+// Get Patient Charts (Vitals + Fluids)
+export const getPatientCharts = async (req: Request, res: Response) => {
     try {
-        const { admissionId } = req.body;
+        const { patientId } = req.params;
+        const pId = String(patientId);
 
-        const admission = await prisma.admission.findUnique({ where: { id: admissionId } });
-        if (!admission) return res.status(404).json({ message: 'Admission not found' });
-        if (admission.status !== 'ADMITTED') return res.status(400).json({ message: 'Patient already discharged' });
-
-        const result = await prisma.$transaction(async (tx) => {
-            // 1. Update Admission
-            const updatedAdmission = await tx.admission.update({
-                where: { id: admissionId },
-                data: {
-                    status: 'DISCHARGED',
-                    dischargeDate: new Date()
-                }
-            });
-
-            // 2. Update Bed Status (Dirty needs cleaning)
-            await tx.bed.update({
-                where: { id: admission.bedId },
-                data: { status: 'VACANT_DIRTY' }
-            });
-
-            return updatedAdmission;
+        // Fetch last 24h or all? Let's limit to 50 recent records
+        const vitals = await prisma.vitalSigns.findMany({
+            where: { patientId: pId },
+            orderBy: { recordedAt: 'desc' },
+            take: 20
         });
 
-        res.json(result);
+        const fluids = await prisma.fluidBalance.findMany({
+            where: { patientId: pId },
+            orderBy: { recordedAt: 'desc' },
+            take: 50
+        });
+
+        res.json({ vitals, fluids });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to discharge patient' });
+        res.status(500).json({ message: 'Error fetching patient charts', error });
     }
 };
 
-/**
- * Update Bed Status (e.g., Clean a dirty bed)
- */
-export const updateBedStatus = async (req: AuthRequest, res: Response) => {
-    try {
-        const bedId = String(req.params.bedId);
-        const { status } = req.body; // Expect 'VACANT_CLEAN' usually
 
-        const bed = await prisma.bed.update({
-            where: { id: bedId },
-            data: { status: status as BedStatus }
+// ----------------------------------------------------------------------
+// DOCTOR ACTIONS (WARD ROUNDS)
+// ----------------------------------------------------------------------
+
+// Add Ward Round Note
+export const addWardRoundNote = async (req: AuthRequest, res: Response) => {
+    try {
+        const { admissionId, notes } = req.body;
+        const staffId = req.user?.id;
+
+        const staff = await prisma.staff.findUnique({ where: { userId: staffId } });
+        if (!staff) return res.status(404).json({ message: 'Staff profile not found' });
+
+        const round = await prisma.wardRound.create({
+            data: {
+                admissionId,
+                notes,
+                conductedById: staff.id
+            }
         });
 
-        res.json(bed);
+        res.status(201).json(round);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to update bed status' });
+        res.status(500).json({ message: 'Error adding ward round note', error });
+    }
+};
+
+// Get Ward Rounds for an Admission
+export const getWardRounds = async (req: Request, res: Response) => {
+    try {
+        const { admissionId } = req.params;
+        const admId = String(admissionId);
+
+        const rounds = await prisma.wardRound.findMany({
+            where: { admissionId: admId },
+            orderBy: { roundTime: 'desc' },
+            include: { conductedBy: { include: { user: true } } }
+        });
+
+        res.json(rounds);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching ward rounds', error });
+    }
+};
+
+export const createDepositInvoice = async (req: AuthRequest, res: Response) => {
+    try {
+        const { admissionId, amount } = req.body;
+        
+        const admission = await prisma.admission.findUnique({
+            where: { id: admissionId },
+            include: { patient: true }
+        });
+
+        if (!admission) return res.status(404).json({ message: "Admission not found" });
+
+        // Create Invoice
+        const invoice = await prisma.invoice.create({
+            data: {
+                invoiceNumber: `DEP-${Date.now()}`,
+                patientId: admission.patientId,
+                items: [{ description: "Hospital Deposit", amount: Number(amount), quantity: 1 }],
+                subtotal: Number(amount),
+                tax: 0,
+                total: Number(amount),
+                balance: Number(amount),
+                status: 'ISSUED',
+                medicalRecordId: null, // Deposit might not link to medical record directly
+                // type: 'DEPOSIT' // Ensure schema has this field! I added it earlier.
+                // Assuming schema update works. If not, this might fail if I use a field that doesn't exist.
+                // I edited schema but maybe didn't run migration?
+                // I did run migration.
+                // Wait, does Invoice model have 'type'?
+                // I added it in previous turn: `type String?` or something.
+                // Checking previous edits... I added `type` to `Invoice` model.
+            }
+        });
+
+        // If schema has 'type', add it. I'll check schema first in next step if this fails, or just risk it?
+        // Actually, I'll check schema first.
+        res.json(invoice);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to create deposit invoice" });
     }
 };

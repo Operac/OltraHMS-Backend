@@ -4,16 +4,16 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate as any);
 
 // Allow Patients to book appointments
-router.post('/', authorize(['ADMIN', 'RECEPTIONIST', 'DOCTOR', 'PATIENT']), createAppointment);
-router.get('/:id', getAppointmentById);
-router.get('/', getAppointments);
+router.post('/', authorize(['ADMIN', 'RECEPTIONIST', 'DOCTOR', 'PATIENT']) as any, createAppointment as any);
+router.get('/:id', getAppointmentById as any);
+router.get('/', getAppointments as any);
 // Update status (Cancel/Confirm) - Patients can Cancel.
-router.patch('/:id/status', authorize(['ADMIN', 'DOCTOR', 'PATIENT']), updateAppointmentStatus);
+router.patch('/:id/status', authorize(['ADMIN', 'DOCTOR', 'PATIENT', 'RECEPTIONIST']) as any, updateAppointmentStatus as any);
 
 // Reschedule
-router.patch('/:id/reschedule', authorize(['ADMIN', 'DOCTOR', 'PATIENT']), rescheduleAppointment);
+router.patch('/:id/reschedule', authorize(['ADMIN', 'DOCTOR', 'PATIENT', 'RECEPTIONIST']) as any, rescheduleAppointment as any);
 
 export default router;

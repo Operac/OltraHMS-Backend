@@ -4,13 +4,13 @@ import { createMedicalRecord, getMedicalRecords, getMedicalRecordById, downloadM
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate as any);
 
-router.post('/', authorize(['DOCTOR', 'ADMIN']), createMedicalRecord);
-router.get('/', authorize(['DOCTOR', 'ADMIN', 'PATIENT']), getMedicalRecords);
-router.get('/:id', authorize(['DOCTOR', 'ADMIN', 'PATIENT']), getMedicalRecordById);
+router.post('/', authorize(['DOCTOR', 'ADMIN']) as any, createMedicalRecord as any);
+router.get('/', authorize(['DOCTOR', 'ADMIN', 'PATIENT', 'NURSE']) as any, getMedicalRecords as any);
+router.get('/:id', authorize(['DOCTOR', 'ADMIN', 'PATIENT', 'NURSE']) as any, getMedicalRecordById as any);
 
 // Download PDF
-router.get('/:id/download', authorize(['DOCTOR', 'ADMIN', 'PATIENT']), downloadMedicalRecordPDF);
+router.get('/:id/download', authorize(['DOCTOR', 'ADMIN', 'PATIENT', 'NURSE']) as any, downloadMedicalRecordPDF as any);
 
 export default router;

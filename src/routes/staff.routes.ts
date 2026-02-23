@@ -4,8 +4,8 @@ import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate as any);
 
-router.get('/doctors', getDoctors);
+router.get('/doctors', getDoctors as any);
 
 export default router;

@@ -189,8 +189,11 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
 
         // 5. Generate Invoice
         // Base consultation fee + extra items
+        const consService = await prisma.service.findFirst({ where: { name: { contains: 'Consultation', mode: 'insensitive' } } });
+        const baseFee = consService?.price ?? 50.00;
+
         const invoiceItems = [
-            { description: "Consultation Fee", amount: 50.00, quantity: 1 },
+            { description: consService ? consService.name : "Consultation Fee", amount: baseFee, quantity: 1 },
             ...(billingItems || [])
         ];
         

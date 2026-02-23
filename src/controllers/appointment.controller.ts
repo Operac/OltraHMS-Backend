@@ -107,10 +107,14 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
 
 export const getAppointments = async (req: AuthRequest, res: Response) => {
     try {
-        const { date, doctorId, patientId } = req.query;
+        const { date, doctorId, patientId, type } = req.query;
         const user = req.user;
 
         const where: any = {};
+
+        if (type) {
+            where.type = String(type);
+        }
 
         // Role-based security enforcement
         if (user?.role === 'PATIENT') {

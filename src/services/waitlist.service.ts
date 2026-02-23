@@ -33,7 +33,6 @@ export class WaitlistService {
             this.doc = new GoogleSpreadsheet(sheetId, jwt);
             await this.doc.loadInfo();
             this.initialized = true;
-            console.log(`✅ Connected to Google Sheet: ${this.doc.title}`);
         } catch (error) {
             console.error('❌ Failed to initialize Google Sheets service:', error);
             this.doc = null; // Ensure fallback
@@ -55,7 +54,6 @@ export class WaitlistService {
             try {
                 const sheet = this.doc.sheetsByIndex[0]; // Use first sheet
                 await sheet.addRow(rowData);
-                console.log(`📝 Added to Sheet: ${data.email}`);
                 return { success: true, method: 'SHEET' };
             } catch (error) {
                 console.error('❌ Failed to add row to Sheet:', error);
@@ -64,7 +62,6 @@ export class WaitlistService {
         }
 
         // Fallback or if credentials missing
-        console.log('📝 [WAITLIST FALLBACK] New Entry:', rowData);
         return { success: true, method: 'LOG' };
     }
 }

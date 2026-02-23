@@ -1,0 +1,30 @@
+﻿[
+    {
+        "id":  "f68e40a8-8e6a-4d6b-b93b-48c55e9ea922",
+        "userId":  "c2e7d77b-bc14-458a-a4e1-8146efb07d20",
+        "name":  "Gregory House",
+        "specialization":  "Diagnostic Medicine",
+        "email":  "gregory@oltrahms.com"
+    },
+    {
+        "id":  "3c0cfcbd-aaa8-473c-ac44-dd966e6d3aaa",
+        "userId":  "64b8340a-d5ab-4fca-934e-0f8ed910524c",
+        "name":  "Meredith Grey",
+        "specialization":  "General Surgery",
+        "email":  "meredith@oltrahms.com"
+    },
+    {
+        "id":  "fc83664d-fa99-495b-bf21-dc6f292cec26",
+        "userId":  "291ee770-4e03-43cd-8854-1bd562788af4",
+        "name":  "Shaun Murphy",
+        "specialization":  "Surgical Resident",
+        "email":  "shaun@oltrahms.com"
+    },
+    {
+        "id":  "02effa79-3a46-4277-81c6-095950b99b6d",
+        "userId":  "76b5cd14-e3b4-4e24-852e-ba67ec574e85",
+        "name":  "Stephen Strange",
+        "specialization":  "Neurosurgeon",
+        "email":  "stephen@oltrahms.com"
+    }
+]

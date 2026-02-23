@@ -221,6 +221,40 @@ export const updateStaffStatus = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * Update Staff HR Details (Salary, Bank, Leave)
+ */
+export const updateStaffHRDetails = async (req: AuthRequest, res: Response) => {
+    try {
+        const staffId = String(req.params.staffId);
+        const { baseSalary, bankDetails } = req.body;
+
+        const updatedStaff = await prisma.staff.update({
+            where: { id: staffId },
+            data: {
+                baseSalary: baseSalary ? Number(baseSalary) : undefined,
+                bankDetails: bankDetails || undefined
+            }
+        });
+
+        // Log Audit
+        await prisma.auditLog.create({
+            data: {
+                userId: req.user?.id || 'SYSTEM',
+                action: 'UPDATE_STAFF_HR',
+                entityType: 'Staff',
+                entityId: staffId,
+                details: `Updated HR details for staff ${updatedStaff.staffNumber}`
+            }
+        });
+
+        res.json(updatedStaff);
+    } catch (error) {
+        console.error("Update HR Details Error:", error);
+        res.status(500).json({ message: 'Failed to update HR details' });
+    }
+};
+
+/**
  * Get System Audit Logs
  */
 export const getAuditLogs = async (req: AuthRequest, res: Response) => {

@@ -12,13 +12,13 @@ import {
 const router = Router();
 
 // Protect all routes: Must be Authenticated AND be a DOCTOR (or ADMIN)
-router.use(authenticate, authorize(['DOCTOR', 'ADMIN']));
+router.use(authenticate as any, authorize(['DOCTOR', 'ADMIN']) as any);
 
-router.get('/dashboard/stats', getDoctorDashboardStats);
-router.get('/patients', getAssignedPatients);
-router.get('/patients/:patientId/history', getPatientMedicalHistory);
-router.post('/consultation', saveConsultation);
-router.post('/labs', orderLabs);
-router.patch('/appointments/:id/status', updateAppointmentStatus);
+router.get('/dashboard/stats', getDoctorDashboardStats as any);
+router.get('/patients', getAssignedPatients as any);
+router.get('/patients/:patientId/history', getPatientMedicalHistory as any);
+router.post('/consultation', saveConsultation as any);
+router.post('/labs', orderLabs as any);
+router.patch('/appointments/:id/status', updateAppointmentStatus as any);
 
 export default router;

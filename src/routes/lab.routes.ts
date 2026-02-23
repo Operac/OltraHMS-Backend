@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { getPendingOrders, updateOrderStatus, uploadResult } from '../controllers/lab.controller';
+import { getPendingOrders, updateOrderStatus, uploadResult, createInvoice } from '../controllers/lab.controller';
 import multer from 'multer';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import cloudinary from '../config/cloudinary';
@@ -28,6 +28,9 @@ router.get('/orders/pending', authorize(['LAB_TECH', 'DOCTOR', 'ADMIN']), getPen
 router.patch('/orders/:id/status', authorize(['LAB_TECH', 'ADMIN']), updateOrderStatus);
 
 // Upload result (File + Data)
-router.post('/orders/:id/result', authorize(['LAB_TECH', 'DOCTOR', 'ADMIN']), upload.single('file'), uploadResult);
+router.post('/orders/:id/result', authorize(['LAB_TECH', 'ADMIN']), upload.single('file'), uploadResult);
+
+// Create invoice
+router.post('/orders/:id/invoice', authorize(['LAB_TECH', 'ADMIN', 'ACCOUNTANT']), createInvoice);
 
 export default router;

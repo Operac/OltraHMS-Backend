@@ -172,7 +172,9 @@ export const getMedicalRecordById = async (req: AuthRequest, res: Response) => {
         patient: true,
         doctor: { include: { user: true } },
         prescriptions: true,
-        labOrders: true,
+        labOrders: {
+            include: { result: true }
+        },
         appointment: true
       }
     });

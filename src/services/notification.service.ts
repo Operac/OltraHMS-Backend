@@ -30,13 +30,10 @@ export const NotificationService = {
       // In a real app, successful API call -> 'SENT', fail -> 'FAILED'
       channels.forEach(channel => {
         if (channel === 'WHATSAPP') {
-          console.log(`[📱 WHATSAPP] To User ${userId}: ${message}`);
         }
         if (channel === 'SMS') {
-          console.log(`[💬 SMS] To User ${userId}: ${message}`);
         }
         if (channel === 'EMAIL') {
-          console.log(`[📧 EMAIL] To User ${userId}: ${message}`);
         }
       });
 

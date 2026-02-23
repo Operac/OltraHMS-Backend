@@ -1,13 +1,12 @@
 import { Server, Socket } from 'socket.io';
+import { prisma } from '../lib/prisma';
 
 export const setupSocketHandlers = (io: any) => {
     io.on('connection', (socket: Socket) => {
-        console.log(`🔌 Client connected: ${socket.id}`);
 
         // Join Room
         socket.on('join-room', (roomId: string) => {
             socket.join(roomId);
-            console.log(`👤 User joined room: ${roomId}`);
             // Notify others in room
             socket.to(roomId).emit('user-connected', socket.id);
         });
@@ -28,7 +27,22 @@ export const setupSocketHandlers = (io: any) => {
         });
 
         // Chat
-        socket.on('send-message', (data: { roomId: string, message: string, senderName: string }) => {
+        socket.on('send-message', async (data: { roomId: string, message: string, senderName: string, senderId: string }) => {
+            // Save to DB
+            try {
+                if (data.senderId) {
+                    await prisma.message.create({
+                        data: {
+                            content: data.message,
+                            senderId: data.senderId,
+                            channel: data.roomId
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error('Error saving message:', err);
+            }
+
             io.to(data.roomId).emit('receive-message', {
                 message: data.message,
                 senderName: data.senderName,
@@ -38,7 +52,6 @@ export const setupSocketHandlers = (io: any) => {
 
         // Leave
         socket.on('disconnect', () => {
-            console.log(`🔌 Client disconnected: ${socket.id}`);
         });
     });
 };
