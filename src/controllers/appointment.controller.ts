@@ -131,8 +131,15 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
             if (patientId) where.patientId = String(patientId);
         }
         
-        if (date) {
+        if (req.query.startDate && req.query.endDate) {
+            const start = new Date(String(req.query.startDate));
+            start.setHours(0,0,0,0);
+            const end = new Date(String(req.query.endDate));
+            end.setHours(23,59,59,999);
+            where.startTime = { gte: start, lte: end };
+        } else if (date) {
             const startDate = new Date(String(date));
+            startDate.setHours(0, 0, 0, 0);
             const endDate = new Date(startDate);
             endDate.setHours(23, 59, 59, 999);
             where.startTime = { gte: startDate, lte: endDate };

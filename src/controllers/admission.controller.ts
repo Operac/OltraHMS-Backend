@@ -112,7 +112,7 @@ export const dischargePatient = async (req: AuthRequest, res: Response) => {
         const result = await prisma.$transaction(async (tx) => {
             const dischargeDate = new Date();
             
-            // 1. Calculate Duration & Cost (Simple logic: $50/day standard, $100/day ICU)
+            // 1. Calculate Duration & Cost (Simple logic: ₦50/day standard, ₦100/day ICU)
             const diffTime = Math.abs(dischargeDate.getTime() - new Date(admission.admissionDate).getTime());
             const daysStayed = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
             

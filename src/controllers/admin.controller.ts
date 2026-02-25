@@ -59,8 +59,15 @@ export const getAllStaff = async (req: AuthRequest, res: Response) => {
                 status: true,
                 staff: {
                     select: {
+                        id: true,
+                        staffNumber: true,
                         departmentId: true,
-                        specialization: true
+                        specialization: true,
+                        department: {
+                            select: {
+                                name: true
+                            }
+                        }
                     }
                 }
             },
