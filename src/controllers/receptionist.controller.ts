@@ -229,7 +229,7 @@ export const listDoctors = async (req: Request, res: Response) => {
 
         const mapped = doctors.map((d: any) => ({
             id: d.id,
-            name: `Dr. ${d.user.firstName} ${d.user.lastName}`,
+            name: `Dr. ${d.user?.firstName || 'Unknown'} ${d.user?.lastName || ''}`.trim(),
             specialization: d.specialization || 'General'
         }));
         

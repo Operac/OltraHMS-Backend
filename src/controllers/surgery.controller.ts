@@ -139,3 +139,52 @@ export const updateStatus = async (req: AuthRequest, res: Response) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+/**
+ * Create Operating Theater (Admin)
+ */
+export const createTheater = async (req: AuthRequest, res: Response) => {
+    try {
+        const { name, type, status, equipment } = req.body;
+        
+        const theater = await prisma.operatingTheater.create({
+            data: {
+                name,
+                type,
+                status: status || 'AVAILABLE',
+                equipment
+            }
+        });
+        
+        res.status(201).json(theater);
+    } catch (error) {
+        console.error('Error creating theater:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+/**
+ * Update Operating Theater (Admin)
+ */
+export const updateTheater = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { name, type, status, equipment } = req.body;
+        
+        const updateData: any = {};
+        if (name) updateData.name = name;
+        if (type) updateData.type = type;
+        if (status) updateData.status = status;
+        if (equipment !== undefined) updateData.equipment = equipment;
+        
+        const theater = await prisma.operatingTheater.update({
+            where: { id: String(id) },
+            data: updateData
+        });
+        
+        res.json(theater);
+    } catch (error) {
+        console.error('Error updating theater:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
