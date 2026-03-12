@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { PrismaClient, AppointmentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth.middleware';
-
 import { prisma } from '../lib/prisma';
+import { sendAppointmentConfirmationEmail } from '../services/email.service';
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '../services/calendar.service';
 
 // Modified to allow patientId to be optional if user is a PATIENT
 const createAppointmentSchema = z.object({
@@ -32,9 +33,7 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
     if (!patientId) return res.status(400).json({ message: 'Patient ID is required' });
 
 
-    // Validate Doctor existence (Ensure it is a Staff record)
-    // NOTE: Frontend usually sends Staff ID. If it sends User ID, we need to map it.
-    // Let's assume frontend sends Staff ID for now.
+    // Validate Doctor exists
     const doctorStaff = await prisma.staff.findUnique({ 
         where: { id: doctorId },
         include: { user: true }
@@ -85,7 +84,14 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
                 : AppointmentStatus.REQUESTED
         },
         include: {
-            patient: { select: { firstName: true, lastName: true, patientNumber: true } },
+            patient: { 
+                select: { 
+                    firstName: true, 
+                    lastName: true, 
+                    patientNumber: true,
+                    user: { select: { email: true, firstName: true, lastName: true } }
+                } 
+            },
             doctor: { 
                 include: { 
                     user: { select: { firstName: true, lastName: true } } 
@@ -93,6 +99,32 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
             }
         }
     });
+
+    // Send confirmation email to patient
+    if (appointment.patient?.user?.email) {
+        try {
+            const appointmentDate = new Date(appointment.appointmentDate);
+            await sendAppointmentConfirmationEmail(
+                appointment.patient.user.email,
+                `${appointment.patient.firstName} ${appointment.patient.lastName}`,
+                `Dr. ${appointment.doctor.user.firstName} ${appointment.doctor.user.lastName}`,
+                appointmentDate.toLocaleDateString(),
+                appointmentDate.toLocaleTimeString(),
+                appointment.type
+            );
+        } catch (emailError) {
+            console.error('Failed to send confirmation email:', emailError);
+        }
+    }
+
+    // Create Google Calendar event
+    if (process.env.GOOGLE_CALENDAR_ENABLED === 'true') {
+        try {
+            await createCalendarEvent(appointment.id);
+        } catch (calendarError) {
+            console.error('Failed to create calendar event:', calendarError);
+        }
+    }
 
     res.status(201).json(appointment);
 

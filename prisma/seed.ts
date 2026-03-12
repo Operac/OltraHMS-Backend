@@ -13,6 +13,8 @@ async function main() {
   await prisma.auditLog.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.videoSession.deleteMany();
+  await prisma.radiologyReport.deleteMany();
+  await prisma.radiologyRequest.deleteMany();
   await prisma.labResult.deleteMany();
   await prisma.labOrder.deleteMany();
   await prisma.payment.deleteMany();
@@ -45,14 +47,14 @@ async function main() {
   await prisma.department.deleteMany();
   await prisma.surgeryCase.deleteMany();
   await prisma.operatingTheater.deleteMany();
-  await prisma.radiologyReport.deleteMany();
-  await prisma.radiologyRequest.deleteMany();
   await prisma.radiologyTest.deleteMany();
   await prisma.service.deleteMany();
   await prisma.user.deleteMany();
 
   // 2. Common Data
-  const passwordHash = await bcrypt.hash('password123', 12);
+  // Use environment variable for seed password, fallback to 'password123' for development
+  const seedPassword = process.env.SEED_PASSWORD || 'password123';
+  const passwordHash = await bcrypt.hash(seedPassword, 12);
   const hireDate = new Date('2022-01-15');
 
   // 3. Create Departments
@@ -161,7 +163,7 @@ async function main() {
     { email: 'reception@oltrahms.com', first: 'Pam', last: 'Beesly', role: Role.RECEPTIONIST, dept: 'Reception', spec: 'Front Desk', num: 'REC-001', sal: 200000 },
     { email: 'accountant@oltrahms.com', first: 'Angela', last: 'Martin', role: Role.ACCOUNTANT, dept: 'Finance', spec: 'Accounting', num: 'FIN-001', sal: 500000 },
     { email: 'insurance@oltrahms.com', first: 'Oscar', last: 'Martinez', role: Role.INSURANCE_OFFICER, dept: 'Finance', spec: 'HMO Officer', num: 'FIN-002', sal: 450000 },
-    { email: 'radio@oltrahms.com', first: 'Marie', last: 'Curie', role: Role.DOCTOR, dept: 'Radiology', spec: 'Radiologist', num: 'RAD-001', sal: 750000 }
+    { email: 'radio@oltrahms.com', first: 'Marie', last: 'Curie', role: Role.RADIOLOGIST, dept: 'Radiology', spec: 'Radiologist', num: 'RAD-001', sal: 750000 }
   ];
 
   const staffDetails = [];

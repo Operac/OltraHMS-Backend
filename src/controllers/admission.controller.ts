@@ -1,7 +1,16 @@
 import { Request, Response } from 'express';
+import { PrismaClient, InvoiceStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate unique invoice numbers
+const generateInvoiceNumber = (prefix: string): string => {
+    const timestamp = Date.now();
+    const random = randomBytes(4).toString('hex');
+    return `${prefix}-${timestamp}-${random}`;
+};
 
 const admitSchema = z.object({
     patientId: z.string(),
@@ -109,15 +118,36 @@ export const dischargePatient = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ message: 'Active admission not found' });
         }
 
+        // Check for unpaid invoices before discharge
+        const unpaidInvoices = await prisma.invoice.findMany({
+            where: {
+                patientId: admission.patientId,
+                status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.DRAFT, InvoiceStatus.PARTIAL] }
+            }
+        });
+
+        if (unpaidInvoices.length > 0) {
+            const totalDue = unpaidInvoices.reduce((sum, inv) => sum + inv.balance, 0);
+            return res.status(400).json({ 
+                message: `Cannot discharge: Patient has ${unpaidInvoices.length} unpaid invoice(s) totaling ₦${totalDue.toLocaleString()}. Please settle all payments first.` 
+            });
+        }
+
         const result = await prisma.$transaction(async (tx) => {
             const dischargeDate = new Date();
             
-            // 1. Calculate Duration & Cost (Simple logic: ₦50/day standard, ₦100/day ICU)
+            // 1. Calculate Duration & Cost using Ward's basePrice
             const diffTime = Math.abs(dischargeDate.getTime() - new Date(admission.admissionDate).getTime());
             const daysStayed = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
             
             // Use Bed's specific price if available, otherwise fallback to Ward's basePrice
+            // Prices should be configured in Naira (₦) by admin
             const ratePerDay = admission.bed.price ?? admission.bed.ward.basePrice;
+            
+            if (!ratePerDay || ratePerDay <= 0) {
+                throw new Error("Bed/Ward price not configured. Please contact admin to set up ward pricing.");
+            }
+            
             const totalCost = daysStayed * ratePerDay;
 
             // 2. Update Admission
@@ -138,7 +168,7 @@ export const dischargePatient = async (req: AuthRequest, res: Response) => {
             // 4. Generate Invoice
             const invoice = await tx.invoice.create({
                 data: {
-                    invoiceNumber: `INV-${Date.now()}`,
+                    invoiceNumber: generateInvoiceNumber('INV'),
                     patientId: admission.patientId,
                     status: 'ISSUED', // Ready for payment
                     items: [{

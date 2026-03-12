@@ -8,6 +8,7 @@ Please refer to the root [README.md](../README.md) for full project setup and do
 
 ## Commands
 
+From the `backend` directory, you can run:
 *   `npm run dev`: Start development server with Nodemon
 *   `npm run build`: Compile TypeScript to JavaScript
 *   `npm start`: Run the compiled production server

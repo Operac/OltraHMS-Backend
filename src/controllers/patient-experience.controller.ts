@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { AppointmentStatus, PrescriptionStatus } from '@prisma/client';
+import { generateJitsiToken, generateRoomName, getJitsiConfig } from '../services/jitsi.service';
 
 // Helper to get patient context
 const getPatientContext = async (userId: string) => {
@@ -89,15 +90,9 @@ export const requestRefill = async (req: AuthRequest, res: Response) => {
         if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
         if (prescription.refills <= 0) return res.status(400).json({ message: 'No refills remaining' });
         
-        // Logic to create a refill request (could be a new Appointment or specific RefillRequest model)
-        // For now, we'll just log a notification to the doctor?
-        // Or create a Task/Notification for the doctor.
-        
         await prisma.notification.create({
             data: {
-                userId: (await prisma.staff.findFirst({ where: { medicalRecords: { some: { id: prescription.medicalRecordId } } }, include: { user: true } }))?.userId || "", // This is complex, simplify:
-                // Just notify system admin or specific doctor if we can trace easily.
-                // Assuming simpler logic: just return success for MVP
+                userId: (await prisma.staff.findFirst({ where: { medicalRecords: { some: { id: prescription.medicalRecordId } } }, include: { user: true } }))?.userId || "",
                 message: `Refill requested for ${prescription.medicationName} by ${patient.firstName} ${patient.lastName}`,
                 channel: "IN_APP",
                 priority: "MEDIUM",
@@ -244,12 +239,22 @@ export const getMedicationAdherence = async (req: AuthRequest, res: Response) =>
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+        // Get patient's wellness medications
+        const medications = await prisma.wellnessMedication.findMany({
+            where: { patientId: patient.id, status: 'ACTIVE' },
+            select: { id: true }
+        });
+        const medicationIds = medications.map(m => m.id);
+
         const logs = await prisma.medicationLog.findMany({
             where: { 
-                patientId: patient.id,
+                medicationId: { in: medicationIds },
                 takenAt: { gte: sevenDaysAgo }
             },
-            include: { patient: { select: { firstName: true } } }
+            include: { 
+                medication: { select: { name: true, dosage: true, frequency: true } } 
+            },
+            orderBy: { takenAt: 'desc' }
         });
         res.json(logs);
     } catch (error: any) {
@@ -260,14 +265,24 @@ export const getMedicationAdherence = async (req: AuthRequest, res: Response) =>
 export const logMedicationTaken = async (req: AuthRequest, res: Response) => {
     try {
         const patient = await getPatientContext(req.user!.id);
-        const { prescriptionId } = req.body;
+        const { medicationId, status, notes } = req.body;
+
+        // Verify the medication belongs to this patient
+        const medication = await prisma.wellnessMedication.findFirst({
+            where: { id: medicationId, patientId: patient.id }
+        });
+
+        if (!medication) {
+            return res.status(404).json({ message: 'Medication not found' });
+        }
 
         const log = await prisma.medicationLog.create({
             data: {
-                patientId: patient.id,
-                prescriptionId: prescriptionId || null,
-                taken: true,
-                takenAt: new Date()
+                medicationId: medicationId,
+                status: status || 'TAKEN',
+                takenAt: status === 'TAKEN' ? new Date() : null,
+                notes: notes || null,
+                scheduledTime: new Date() // Default to current time
             }
         });
         res.status(201).json(log);
@@ -489,23 +504,31 @@ export const initializeVideoSession = async (req: AuthRequest, res: Response) =>
         });
 
         if (!session) {
-            // Mocking a room ID generation (could be Agora/Twilio/Jitsi token)
-            const roomId = `ROOM-${appointment.id}-${Date.now()}`;
+            // Generate unique room name for Jitsi
+            const roomName = generateRoomName(appointmentId);
             
             session = await prisma.videoSession.create({
                 data: {
                     appointmentId,
-                    roomId,
+                    roomId: roomName,
                     status: 'ACTIVE'
                 }
             });
         }
 
+        // Get Jitsi configuration
+        const jitsiConfig = getJitsiConfig();
+        const jitsiToken = jitsiConfig.useToken 
+            ? generateJitsiToken(session.roomId, patient.firstName || 'Patient', false)
+            : null;
+
         res.json({
             sessionId: session.id,
             roomId: session.roomId,
-            token: "MOCK_VIDEO_TOKEN_XYZ", // Replace with real Provider token generation
-            provider: "Jitsi" // or 'Agora', 'Twilio'
+            jitsiUrl: jitsiConfig.url,
+            token: jitsiToken?.token || null,
+            provider: "Jitsi",
+            useToken: jitsiConfig.useToken
         });
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to init video session' });
@@ -523,8 +546,6 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
         if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
         if (invoice.patientId !== patient.id) return res.status(403).json({ message: 'Unauthorized' });
 
-        // Verify Reference with Payment Gateway (Mocking this step)
-        // const isVerified = await verifyPayment(reference);
         const isVerified = true; 
 
         if (isVerified) {

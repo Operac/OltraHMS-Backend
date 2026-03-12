@@ -6,7 +6,8 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 async function main() {
-    const hash = await bcrypt.hash("password123", 12);
+    const password = process.env.ADMIN_PASSWORD || 'password123';
+    const hash = await bcrypt.hash(password, 12);
     
     // Check if user already exists
     let existing = await prisma.user.findUnique({ where: { email: 'admin@oltrahms.com' } });

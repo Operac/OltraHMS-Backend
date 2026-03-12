@@ -11,7 +11,8 @@ async function main() {
         console.log("No admin found.");
         return;
     }
-    const hash = await bcrypt.hash("password123", 12);
+    const password = process.env.ADMIN_PASSWORD || 'password123';
+    const hash = await bcrypt.hash(password, 12);
     await prisma.user.update({
         where: { id: admin.id },
         data: { passwordHash: hash, failedLoginAttempts: 0, lockoutUntil: null }

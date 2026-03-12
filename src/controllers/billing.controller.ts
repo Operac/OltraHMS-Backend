@@ -3,6 +3,14 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { z } from 'zod';
 import { InvoiceStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate unique invoice numbers
+const generateInvoiceNumber = (prefix: string): string => {
+    const timestamp = Date.now();
+    const random = randomBytes(4).toString('hex');
+    return `${prefix}-${timestamp}-${random}`;
+};
 
 export const getPatientInvoices = async (req: AuthRequest, res: Response) => {
     try {

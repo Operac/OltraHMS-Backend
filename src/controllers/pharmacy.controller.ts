@@ -1,10 +1,85 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate unique invoice numbers
+const generateInvoiceNumber = (prefix: string): string => {
+    const timestamp = Date.now();
+    const random = randomBytes(4).toString('hex');
+    return `${prefix}-${timestamp}-${random}`;
+};
 
 /**
- * Get prescriptions that are ready to be dispensed
+ * Get availability status for multiple prescriptions
+ * Helps pharmacy see what can be dispensed vs what needs external pharmacy
  */
+export const checkPrescriptionAvailability = async (req: AuthRequest, res: Response) => {
+    try {
+        const { prescriptionIds } = req.body;
+        
+        if (!prescriptionIds || !Array.isArray(prescriptionIds)) {
+            return res.status(400).json({ message: 'prescriptionIds array required' });
+        }
+
+        const results = await Promise.all(prescriptionIds.map(async (prescriptionId: string) => {
+            const prescription = await prisma.prescription.findUnique({
+                where: { id: prescriptionId },
+                include: { patient: true }
+            });
+
+            if (!prescription) {
+                return { prescriptionId, status: 'NOT_FOUND', message: 'Prescription not found' };
+            }
+
+            // Check if medication exists in catalog
+            const medication = await prisma.medication.findFirst({
+                where: { name: { equals: prescription.medicationName, mode: 'insensitive' } }
+            });
+
+            if (!medication) {
+                return { 
+                    prescriptionId, 
+                    status: 'EXTERNAL', 
+                    medicationName: prescription.medicationName,
+                    message: 'Not in hospital catalog - get from external pharmacy'
+                };
+            }
+
+            // Check stock
+            const batches = await prisma.inventoryBatch.findMany({
+                where: { medicationId: medication.id, quantity: { gt: 0 } }
+            });
+
+            const totalStock = batches.reduce((sum, b) => sum + b.quantity, 0);
+            
+            if (totalStock === 0) {
+                return { 
+                    prescriptionId, 
+                    status: 'OUT_OF_STOCK', 
+                    medicationName: prescription.medicationName,
+                    message: 'Out of stock - get from external pharmacy'
+                };
+            }
+
+            // Check if prescribed quantity is available
+            const available = totalStock >= prescription.quantity;
+            return { 
+                prescriptionId, 
+                status: available ? 'AVAILABLE' : 'PARTIAL',
+                medicationName: prescription.medicationName,
+                requestedQuantity: prescription.quantity,
+                availableQuantity: totalStock,
+                message: available ? 'Can dispense full amount' : `Only ${totalStock} available - rest from external pharmacy`
+            };
+        }));
+
+        res.json(results);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to check availability' });
+    }
+};
+
 export const getPendingPrescriptions = async (req: AuthRequest, res: Response) => {
     try {
         const prescriptions = await prisma.prescription.findMany({
@@ -63,6 +138,13 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
 
         if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
 
+        // Check if prescription has expired
+        if (prescription.expiryDate && new Date() > prescription.expiryDate) {
+            return res.status(400).json({ 
+                message: 'Prescription has expired. Please consult your doctor for a new prescription.' 
+            });
+        }
+
         // Get Staff ID
         const userWithStaff = await prisma.user.findUnique({
             where: { id: req.user?.id },
@@ -75,37 +157,103 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
         const staffId = userWithStaff.staff.id;
 
         // Start Transaction to ensure atomicity
-        // Check validation
-        if (!process.env.SKIP_INVOICE_CHECK) {
-            // Check if there is a PAID invoice linked to this prescription/medicalRecord
-            // This logic assumes 1 invoice per prescription or medical record context
-            const invoice = await prisma.invoice.findFirst({
-                where: { 
-                    OR: [
-                        { medicalRecordId: prescription.medicalRecordId },
-                        // In future, link invoice directly to prescription items if needed
-                    ],
-                    status: 'PAID'
+        // Check for existing unpaid invoice for this medical record/prescription
+        const existingInvoice = await prisma.invoice.findFirst({
+            where: {
+                patientId: prescription.patientId,
+                status: { in: ['ISSUED', 'PARTIAL'] },
+                OR: [
+                    { medicalRecordId: prescription.medicalRecordId },
+                ].filter(Boolean)
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1
+        });
+
+        // Check if medication is available in inventory before proceeding
+        const medicationExists = await prisma.medication.findFirst({
+            where: { name: { equals: prescription.medicationName, mode: 'insensitive' } }
+        });
+        
+        if (!medicationExists) {
+            // Medication not in hospital system - mark for external pharmacy
+            return res.status(200).json({ 
+                message: `Medication '${prescription.medicationName}' is not available in hospital pharmacy.`,
+                requiresExternal: true,
+                medicationName: prescription.medicationName,
+                dispensed: false
+            });
+        }
+
+        // Check total stock across all batches
+        const inventoryBatches = await prisma.inventoryBatch.findMany({
+            where: { medicationId: medicationExists.id, quantity: { gt: 0 } }
+        });
+        
+        const totalStock = inventoryBatches.reduce((sum, batch) => sum + batch.quantity, 0);
+        if (totalStock === 0) {
+            // Out of stock - mark for external pharmacy
+            return res.status(200).json({ 
+                message: `Medication '${prescription.medicationName}' is out of stock.`,
+                requiresExternal: true,
+                medicationName: prescription.medicationName,
+                dispensed: false
+            });
+        }
+
+        // Payment verification (unless SKIP_INVOICE_CHECK is enabled for testing)
+        if (process.env.SKIP_INVOICE_CHECK !== 'true') {
+            // Check if there's an existing unpaid invoice OR a paid invoice for this encounter
+            const hasValidInvoice = existingInvoice || await prisma.invoice.findFirst({
+                where: {
+                    patientId: prescription.patientId,
+                    status: 'PAID',
+                    medicalRecordId: prescription.medicalRecordId
                 }
             });
-
-            // NOTE: For now we warn or block based on config. 
-            // In strict mode, uncomment:
-            // if (!invoice) return res.status(402).json({ message: "Payment required before dispensing." });
+            
+            if (!hasValidInvoice) {
+                return res.status(402).json({ 
+                    message: "Payment required before dispensing. No valid invoice found.",
+                    requiresPayment: true
+                });
+            }
         }
 
         const result = await prisma.$transaction(async (tx) => {
             let totalCost = 0;
-            const invoiceItems = [];
+            const invoiceItems: Array<{
+                description: string;
+                quantity: number;
+                unitPrice: number;
+                total: number;
+            }> = [];
 
             for (const item of items) {
                 const { batchId, quantity, medicationId } = item;
 
-                // 1. Get Batch & Med details
-                const batch = await tx.inventoryBatch.findUnique({
-                    where: { id: batchId },
-                    include: { medication: true }
-                });
+                // 1. Get Batch & Med details - Apply FEFO (First Expired First Out)
+                let batch;
+                if (batchId) {
+                    // If specific batch provided, use it
+                    batch = await tx.inventoryBatch.findUnique({
+                        where: { id: batchId },
+                        include: { medication: true }
+                    });
+                } else {
+                    // If no batch specified, auto-select the earliest expiring batch (FEFO)
+                    batch = await tx.inventoryBatch.findFirst({
+                        where: { 
+                            medicationId: medicationId,
+                            quantity: { gte: quantity }
+                        },
+                        orderBy: { expiryDate: 'asc' },
+                        include: { medication: true }
+                    });
+                    if (!batch) {
+                        throw new Error(`Insufficient stock for medication ${medicationId}`);
+                    }
+                }
 
                 if (!batch) throw new Error(`Batch ${batchId} not found`);
                 if (batch.quantity < quantity) throw new Error(`Insufficient stock in Batch ${batch.batchNumber}`);
@@ -116,13 +264,7 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
                     data: { quantity: batch.quantity - quantity }
                 });
 
-                // 3. Record Dispensing
-                // Note: Schema has 1-to-1 dispensing-prescription, but we might have multiple items if prescription has multiple meds?
-                // Actually existing schema `Dispensing` is 1-to-1 with `Prescription`. 
-                // The current schema assumes 1 Prescription = 1 Med. 
-                // If Frontend makes multiple calls/loop, that works. Or if Prescription is 1 line item.
-                // Assuming 1 Prescription Record = 1 Drug.
-                
+                // 3. Record Dispensing (1 Prescription = 1 Medication)
                 await tx.dispensing.create({
                     data: {
                         prescriptionId: prescriptionId,
@@ -150,21 +292,41 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
                 data: { status: 'DISPENSED' }
             });
 
-            // 5. Generate Invoice
-            // Check if open invoice exists? For simplicity, create new one for this transaction.
-            const invoice = await tx.invoice.create({
-                data: {
-                    invoiceNumber: `INV-${Date.now()}`,
-                    patientId: prescription.patientId,
-                    medicalRecordId: prescription.medicalRecordId, // Link to visit
-                    items: invoiceItems,
-                    subtotal: totalCost,
-                    tax: 0, // Simplified
-                    total: totalCost,
-                    balance: totalCost,
-                    status: 'ISSUED'
-                }
-            });
+            // 5. Generate Invoice or Update Existing
+            let invoice;
+            if (existingInvoice) {
+                // Append items to existing unpaid invoice
+                const currentItems = existingInvoice.items as any[];
+                currentItems.push(...invoiceItems);
+                
+                const newTotal = existingInvoice.total + totalCost;
+                const newBalance = existingInvoice.balance + totalCost;
+
+                invoice = await tx.invoice.update({
+                    where: { id: existingInvoice.id },
+                    data: {
+                        items: currentItems,
+                        subtotal: newTotal,
+                        total: newTotal,
+                        balance: newBalance
+                    }
+                });
+            } else {
+                // Create new invoice only if no existing unpaid invoice
+                invoice = await tx.invoice.create({
+                    data: {
+                        invoiceNumber: generateInvoiceNumber('INV'),
+                        patientId: prescription.patientId,
+                        medicalRecordId: prescription.medicalRecordId,
+                        items: invoiceItems,
+                        subtotal: totalCost,
+                        tax: 0,
+                        total: totalCost,
+                        balance: totalCost,
+                        status: 'ISSUED'
+                    }
+                });
+            }
 
             return { invoice, prescriptionId };
         });
@@ -263,7 +425,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
 
         const invoice = await prisma.invoice.create({
             data: {
-                invoiceNumber: `INV-RX-${Date.now()}`,
+                invoiceNumber: generateInvoiceNumber('INV-RX'),
                 patientId: prescription.patientId,
                 medicalRecordId: prescription.medicalRecordId,
                 status: 'ISSUED',

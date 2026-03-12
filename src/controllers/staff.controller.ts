@@ -6,16 +6,6 @@ import { prisma } from '../lib/prisma';
 
 export const getDoctors = async (req: AuthRequest, res: Response) => {
   try {
-    // Fetch users with role DOCTOR and include their staff profile
-    // OR fetch Staff who are doctors? 
-    // Schema: User has role. Staff links to User. 
-    // Best to query Staff where user.role is DOCTOR?
-    
-    // Simplest: Find Users with role DOCTOR, include Staff info.
-    // Or Find Staff, include User, filter by User.role?
-    // Let's traverse from Staff, assuming all Staff have entries?
-    // Actually, role is on User.
-    
     const doctors = await prisma.user.findMany({
         where: { role: Role.DOCTOR, status: 'ACTIVE' },
         select: {

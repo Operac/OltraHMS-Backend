@@ -1,6 +1,14 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { createNotification } from './notification.controller';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate unique invoice numbers
+const generateInvoiceNumber = (prefix: string): string => {
+    const timestamp = Date.now();
+    const random = randomBytes(4).toString('hex');
+    return `${prefix}-${timestamp}-${random}`;
+};
 
 export const getPendingOrders = async (req: Request, res: Response) => {
     try {
@@ -76,13 +84,7 @@ export const uploadResult = async (req: Request, res: Response) => {
                 let isPaid = false;
 
                 if (linkedInvoice) {
-                     // Check if THIS specific lab test is covered in the invoice items? 
-                     // Or just if the invoice is PAID/PARTIAL?
-                     // Simplest: Check if invoice is PAID.
-                     if (linkedInvoice.status === 'PAID') isPaid = true;
-                     
-                     // Deep check: Check if item is in invoice AND invoice is partially paid? 
-                     // For now, Require PAID status for the whole encounter invoice.
+                      if (linkedInvoice.status === 'PAID') isPaid = true;
                 }
 
                 // Also check if there's an unlinked invoice for this patient/labOrder?
@@ -93,9 +95,7 @@ export const uploadResult = async (req: Request, res: Response) => {
                 // UNLESS it's emergency?
                 
                 if (!isPaid && order.priority !== 'STAT') {
-                     // Check for separate invoice?
-                     // Let's allow if invoice check is skipped.
-                     // return res.status(402).json({ message: "Payment required before upload." });
+                     return res.status(402).json({ message: "Payment required before upload." });
                 }
             }
         }
@@ -198,7 +198,7 @@ export const createInvoice = async (req: Request, res: Response) => {
 
         const invoice = await prisma.invoice.create({
             data: {
-                invoiceNumber: `INV-LAB-${Date.now()}`,
+                invoiceNumber: generateInvoiceNumber('INV-LAB'),
                 patientId: DOCTOR_ORDER.patientId,
                 medicalRecordId: DOCTOR_ORDER.medicalRecordId, // Link to same visit
                 status: 'ISSUED',
@@ -242,10 +242,10 @@ export const createInvoice = async (req: Request, res: Response) => {
 
                 if (existingInvoice) { 
                     
-                    if (existingInvoice.status === 'PAID') {
+                     if (existingInvoice.status === 'PAID') {
                          const newInvoice = await prisma.invoice.create({
                             data: {
-                                invoiceNumber: `INV-LAB-${Date.now()}`,
+                                invoiceNumber: generateInvoiceNumber('INV-LAB'),
                                 patientId: existingOrder.patientId,
                                 // medicalRecordId: null, // Don't link if one exists
                                 status: 'ISSUED',

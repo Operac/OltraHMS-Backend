@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { NotificationService } from '../services/notification.service';
+import { generateJitsiToken, generateRoomName, getJitsiConfig } from '../services/jitsi.service';
 
 export const createVideoSession = async (req: AuthRequest, res: Response) => {
     try {
@@ -23,18 +24,35 @@ export const createVideoSession = async (req: AuthRequest, res: Response) => {
         });
 
         if (existingSession && existingSession.status === 'ACTIVE') {
-            return res.json(existingSession);
+            // Return existing session with Jitsi config
+            const jitsiConfig = getJitsiConfig();
+            const jitsiToken = jitsiConfig.useToken 
+                ? generateJitsiToken(existingSession.roomId, appointment.doctor.user.firstName || 'Doctor', true)
+                : null;
+
+            return res.json({
+                ...existingSession,
+                jitsiUrl: jitsiConfig.url,
+                token: jitsiToken?.token || null,
+                useToken: jitsiConfig.useToken
+            });
         }
 
-        // Create new session
-        // We'll use the appointmentID as the Room ID for simplicity
+        // Create new session with Jitsi room
+        const roomName = generateRoomName(appointmentId);
         const session = await prisma.videoSession.create({
             data: {
                 appointmentId,
-                roomId: appointmentId, 
+                roomId: roomName,
                 status: 'ACTIVE'
             }
         });
+
+        // Get Jitsi configuration
+        const jitsiConfig = getJitsiConfig();
+        const jitsiToken = jitsiConfig.useToken 
+            ? generateJitsiToken(roomName, appointment.doctor.user.firstName || 'Doctor', true)
+            : null;
 
         // Notify Patient
         if (appointment.patient.user) {
@@ -44,7 +62,12 @@ export const createVideoSession = async (req: AuthRequest, res: Response) => {
             );
         }
 
-        res.status(201).json(session);
+        res.status(201).json({
+            ...session,
+            jitsiUrl: jitsiConfig.url,
+            token: jitsiToken?.token || null,
+            useToken: jitsiConfig.useToken
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Failed to create video session' });

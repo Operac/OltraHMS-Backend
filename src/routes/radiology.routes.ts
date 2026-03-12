@@ -29,14 +29,10 @@ router.get('/tests', getTests);
 router.post('/requests', authorize(['DOCTOR', 'ADMIN']), createRequest);
 
 // Radiologist/Doctor/Admin - View Worklist
-router.get('/requests', authorize(['DOCTOR', 'ADMIN', 'LAB_TECH']), getRequests); // Assuming Radiologist might have DOCTOR or specific role. Using common ones for now.
-// Ideally usage of specific RADIOLOGIST role if added to enum. For now treating as DOCTOR or LAB_TECH context.
-// Wait, I didn't add RADIOLOGIST to Role enum in schema. It likely falls under DOCTOR or maybe I should add it.
-// Schema has: ADMIN, DOCTOR, NURSE, RECEPTIONIST, PATIENT, PHARMACIST, LAB_TECH, ACCOUNTANT, INSURANCE_OFFICER.
-// I will use DOCTOR for now, or maybe LAB_TECH. Let's allow DOCTOR and ADMIN.
+router.get('/requests', authorize(['DOCTOR', 'ADMIN', 'LAB_TECH', 'RADIOLOGIST']), getRequests);
 
-// Radiologist - Add Report (with images)
+// Radiologist/Lab Tech - Add Report (with images)
 // Upload up to 5 images
-router.post('/requests/:requestId/report', authorize(['DOCTOR', 'ADMIN']), upload.array('images', 5), addReport);
+router.post('/requests/:requestId/report', authorize(['DOCTOR', 'ADMIN', 'LAB_TECH', 'RADIOLOGIST']), upload.array('images', 5), addReport);
 
 export default router;

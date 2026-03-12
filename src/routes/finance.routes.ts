@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { getPendingInvoices, processPayment } from '../controllers/finance.controller';
+import { getPendingInvoices, processPayment, processRefund } from '../controllers/finance.controller';
 import { getServices, createService, updateService, deleteService } from '../controllers/service.controller';
 import { getExpenses, addExpense, getProfitLoss } from '../controllers/expense.controller';
 
@@ -12,6 +12,7 @@ router.use(authenticate);
 // Only Accountants and Admins can access finance data
 router.get('/invoices', authorize(['ADMIN', 'ACCOUNTANT']), getPendingInvoices);
 router.post('/pay', authorize(['ADMIN', 'ACCOUNTANT']), processPayment);
+router.post('/refund', authorize(['ADMIN', 'ACCOUNTANT']), processRefund);
 
 // --- SERVICES (Prices) ---
 // Everyone can view prices (Doctors needs it for ordering)

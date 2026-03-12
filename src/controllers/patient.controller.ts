@@ -5,6 +5,14 @@ import { z } from 'zod';
 import { generatePatientId } from '../services/patient.service';
 import { logAudit } from '../services/audit.service';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { sanitizeSearchQuery, sanitizeString } from '../utils/sanitization';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate a secure random password
+const generateSecurePassword = (): string => {
+    const random = randomBytes(8).toString('hex');
+    return `Oltra${random}@`;
+};
 
 import { prisma } from '../lib/prisma';
 
@@ -36,9 +44,10 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
     // Generate ID
     const patientNumber = await generatePatientId();
     
-    // Default password for new patients (should be changed on first login)
+    // Generate unique secure password (should be changed on first login)
     // In production, send a reset link instead.
-    const hashedPassword = await bcrypt.hash('OltraHMS@123', 12);
+    const tempPassword = generateSecurePassword();
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
     // Transaction: Create User + Patient
     const result = await prisma.$transaction(async (tx) => {
@@ -89,7 +98,7 @@ export const getPatients = async (req: Request, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
-    const search = req.query.search as string;
+    const search = sanitizeSearchQuery(req.query.search);
 
     const skip = (page - 1) * limit;
 

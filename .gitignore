@@ -25,6 +25,8 @@ lerna-debug.log*
 scripts/check-env.ts
 
 
+error.log
+
 # Testing
 coverage/
 test_output.txt

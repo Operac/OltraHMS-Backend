@@ -107,13 +107,7 @@ export const createMedicalRecord = async (req: AuthRequest, res: Response) => {
         });
     }
 
-    if (data.vitals) {
-        // Optional: Create Vitals record
-        // await prisma.vitalSigns.create({ ... })
-    }
-
     res.status(201).json(record);
-// ... createMedicalRecord existing code ...
   } catch (error: any) {
     console.error(error);
     const fs = require('fs');

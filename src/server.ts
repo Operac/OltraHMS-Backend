@@ -20,6 +20,7 @@ import receptionistRoutes from './routes/receptionist.routes';
 import publicRoutes from './routes/public.routes';
 
 import { setupSocketHandlers } from './socket/socket.handler';
+import { initializeSocket, notifyAppointment, notifyNewMessage, notifyLabResult, notifyPrescription } from './services/notification.service';
 import videoRoutes from './routes/video.routes';
 import notificationRoutes from './routes/notification.routes';
 
@@ -65,13 +66,22 @@ const PORT = process.env.PORT || 3000;
 import helmet from 'helmet';
 
 app.use(helmet());
-app.use(cors({
-    origin: [
+
+// CORS configuration - only allow localhost in development
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const allowedOrigins = isDevelopment
+    ? [
         process.env.FRONTEND_URL || "http://localhost:5173", 
         "http://localhost:5173", 
         "http://localhost:3000",
         "http://localhost:5174"
-    ],
+      ]
+    : process.env.FRONTEND_URL
+      ? [process.env.FRONTEND_URL]
+      : [];
+
+app.use(cors({
+    origin: allowedOrigins,
     credentials: true
 }));
 app.use(express.json());
@@ -114,7 +124,33 @@ app.get('/', (req, res) => {
 // Global Error Handler for Express
 app.use((err: any, req: any, res: any, next: any) => {
     console.error('🔥 Global Error Caught:', err);
-    res.status(500).json({ message: 'Internal Server Error', error: err?.message || 'Unknown error' });
+    
+    // Handle different error types
+    if (err.name === 'ValidationError') {
+        return res.status(400).json({ 
+            success: false,
+            message: 'Validation Error', 
+            errors: err.errors 
+        });
+    }
+    
+    if (err.name === 'UnauthorizedError') {
+        return res.status(401).json({ 
+            success: false,
+            message: 'Unauthorized access' 
+        });
+    }
+    
+    // Don't leak internal error details in production
+    const message = process.env.NODE_ENV === 'production' 
+        ? 'An unexpected error occurred' 
+        : err.message || 'Unknown error';
+    
+    res.status(err.status || 500).json({ 
+        success: false,
+        message,
+        ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+    });
 });
 
 // Prevent Node process from crashing on unexpected errors (e.g. DB Drops)

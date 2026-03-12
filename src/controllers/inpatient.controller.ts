@@ -199,19 +199,10 @@ export const createDepositInvoice = async (req: AuthRequest, res: Response) => {
                 total: Number(amount),
                 balance: Number(amount),
                 status: 'ISSUED',
-                medicalRecordId: null, // Deposit might not link to medical record directly
-                // type: 'DEPOSIT' // Ensure schema has this field! I added it earlier.
-                // Assuming schema update works. If not, this might fail if I use a field that doesn't exist.
-                // I edited schema but maybe didn't run migration?
-                // I did run migration.
-                // Wait, does Invoice model have 'type'?
-                // I added it in previous turn: `type String?` or something.
-                // Checking previous edits... I added `type` to `Invoice` model.
+                medicalRecordId: null
             }
         });
 
-        // If schema has 'type', add it. I'll check schema first in next step if this fails, or just risk it?
-        // Actually, I'll check schema first.
         res.json(invoice);
     } catch (error) {
         console.error(error);

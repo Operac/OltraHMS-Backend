@@ -6,8 +6,38 @@ import { PrismaClient, Role, Status, Gender } from '@prisma/client';
 import { z } from 'zod';
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email.service';
 import { logAudit } from '../services/audit.service';
+import { generateTwoFactorSecret, generateTwoFactorQRUrl, verifyTwoFactorCode, generateBackupCodes, verifyBackupCode } from '../services/twoFactor.service';
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypto';
 
 import { prisma } from '../lib/prisma';
+
+// Encryption key derived from JWT_SECRET for 2FA secrets
+const getEncryptionKey = (): Buffer => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error("JWT_SECRET environment variable is required");
+    }
+    return createHash('sha256').update(secret).digest();
+};
+
+const encryptSecret = (secret: string): string => {
+    const key = getEncryptionKey();
+    const iv = randomBytes(16);
+    const cipher = createCipheriv('aes-256-cbc', key, iv);
+    let encrypted = cipher.update(secret, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return iv.toString('hex') + ':' + encrypted;
+};
+
+const decryptSecret = (encryptedSecret: string): string => {
+    const key = getEncryptionKey();
+    const [ivHex, encrypted] = encryptedSecret.split(':');
+    const iv = Buffer.from(ivHex, 'hex');
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+};
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -192,6 +222,244 @@ export const resetPasswordRequest = async (req: Request, res: Response) => {
         res.json({ message: 'Password reset email sent' });
     } catch (error) {
         res.status(500).json({ message: 'Error sending reset email' });
+    }
+}
+
+export const resetPasswordConfirm = async (req: Request, res: Response) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ message: 'Token and new password are required' });
+        }
+
+        // Validate password strength
+        if (newPassword.length < 8) {
+            return res.status(400).json({ message: 'Password must be at least 8 characters' });
+        }
+
+        // Find user with this token
+        const user = await prisma.user.findFirst({
+            where: {
+                resetToken: token,
+                resetTokenExpiry: { gt: new Date() } // Token not expired
+            }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired reset token' });
+        }
+
+        // Hash new password
+        const passwordHash = await bcrypt.hash(newPassword, 12);
+
+        // Update password and clear reset token
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                passwordHash,
+                resetToken: null,
+                resetTokenExpiry: null
+            }
+        });
+
+        res.json({ message: 'Password reset successfully' });
+    } catch (error) {
+        console.error('Password reset error:', error);
+        res.status(500).json({ message: 'Error resetting password' });
+    }
+}
+
+// ==================== TWO FACTOR AUTHENTICATION ====================
+
+export const setupTwoFactor = async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        if (user.twoFactorEnabled) {
+            return res.status(400).json({ message: '2FA is already enabled' });
+        }
+
+        // Generate secret
+        const secret = generateTwoFactorSecret();
+        const qrUrl = generateTwoFactorQRUrl(user.email, secret);
+
+        // Store secret temporarily encrypted (not enabled yet)
+        const encryptedSecret = encryptSecret(secret);
+        await prisma.user.update({
+            where: { id: userId },
+            data: { twoFactorSecret: encryptedSecret }
+        });
+
+        res.json({
+            message: '2FA setup initiated',
+            secret,
+            qrUrl
+        });
+    } catch (error) {
+        console.error('2FA setup error:', error);
+        res.status(500).json({ message: 'Error setting up 2FA' });
+    }
+}
+
+export const enableTwoFactor = async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        const { code } = req.body;
+
+        if (!userId) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        if (!code) {
+            return res.status(400).json({ message: 'Verification code is required' });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.twoFactorSecret) {
+            return res.status(400).json({ message: 'Please setup 2FA first' });
+        }
+
+        // Decrypt the secret for verification
+        const decryptedSecret = decryptSecret(user.twoFactorSecret);
+        
+        // Verify the code
+        const isValid = verifyTwoFactorCode(decryptedSecret, code);
+        if (!isValid) {
+            return res.status(400).json({ message: 'Invalid verification code' });
+        }
+
+        // Generate backup codes
+        const backupCodes = generateBackupCodes(10);
+
+        // Encrypt the secret before storing
+        const encryptedSecret = encryptSecret(user.twoFactorSecret);
+
+        // Enable 2FA and store backup codes
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                twoFactorEnabled: true,
+                twoFactorBackupCodes: JSON.stringify(backupCodes),
+                twoFactorSecret: encryptedSecret
+            }
+        });
+
+        res.json({
+            message: '2FA enabled successfully',
+            backupCodes
+        });
+    } catch (error) {
+        console.error('2FA enable error:', error);
+        res.status(500).json({ message: 'Error enabling 2FA' });
+    }
+}
+
+export const disableTwoFactor = async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        const { password, code } = req.body;
+
+        if (!userId) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.twoFactorEnabled) {
+            return res.status(400).json({ message: '2FA is not enabled' });
+        }
+
+        // Verify password
+        const isValidPassword = await bcrypt.compare(password || '', user.passwordHash);
+        if (!isValidPassword) {
+            return res.status(401).json({ message: 'Invalid password' });
+        }
+
+        // Verify 2FA code or backup code
+        const storedCodes = user.twoFactorBackupCodes 
+            ? JSON.parse(user.twoFactorBackupCodes) 
+            : [];
+        
+        // Decrypt secret for verification
+        const decryptedSecret = user.twoFactorSecret ? decryptSecret(user.twoFactorSecret) : '';
+        
+        const isValidCode = verifyTwoFactorCode(decryptedSecret, code);
+        const backupResult = verifyBackupCode(code || '', storedCodes);
+
+        if (!isValidCode && !backupResult.valid) {
+            return res.status(401).json({ message: 'Invalid verification code' });
+        }
+
+        // Disable 2FA
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                twoFactorEnabled: false,
+                twoFactorSecret: null,
+                twoFactorBackupCodes: null
+            }
+        });
+
+        res.json({ message: '2FA disabled successfully' });
+    } catch (error) {
+        console.error('2FA disable error:', error);
+        res.status(500).json({ message: 'Error disabling 2FA' });
+    }
+}
+
+export const verifyTwoFactor = async (req: Request, res: Response) => {
+    try {
+        const { userId, code, isBackupCode } = req.body;
+
+        if (!userId || !code) {
+            return res.status(400).json({ message: 'User ID and code are required' });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.twoFactorEnabled) {
+            return res.status(400).json({ message: '2FA is not enabled' });
+        }
+
+        // Try regular TOTP code first
+        if (!isBackupCode) {
+            // Decrypt the secret first
+            const decryptedSecret = user.twoFactorSecret ? decryptSecret(user.twoFactorSecret) : '';
+            const isValid = verifyTwoFactorCode(decryptedSecret, code);
+            if (isValid) {
+                return res.json({ valid: true });
+            }
+        }
+
+        // Try backup code
+        const storedCodes = user.twoFactorBackupCodes 
+            ? JSON.parse(user.twoFactorBackupCodes) 
+            : [];
+        
+        const backupResult = verifyBackupCode(code, storedCodes);
+
+        if (backupResult.valid) {
+            // Update remaining backup codes
+            await prisma.user.update({
+                where: { id: userId },
+                data: { 
+                    twoFactorBackupCodes: JSON.stringify(backupResult.remainingCodes) 
+                }
+            });
+            return res.json({ valid: true, usedBackupCode: true });
+        }
+
+        res.status(401).json({ valid: false, message: 'Invalid code' });
+    } catch (error) {
+        console.error('2FA verification error:', error);
+        res.status(500).json({ message: 'Error verifying 2FA' });
     }
 }
 

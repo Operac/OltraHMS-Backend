@@ -2,6 +2,14 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { AppointmentStatus, PrescriptionStatus, LabStatus, InvoiceStatus, LabPriority } from '@prisma/client';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate unique invoice numbers
+const generateInvoiceNumber = (prefix: string): string => {
+    const timestamp = Date.now();
+    const random = randomBytes(4).toString('hex');
+    return `${prefix}-${timestamp}-${random}`;
+};
 
 // Helper to get doctor context
 const getDoctorContext = async (userId: string) => {
@@ -149,6 +157,9 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
         });
 
         // 2. Create Prescriptions
+        // Note: We don't require medication to exist in hospital catalog because:
+        // - Patient may take prescription to external pharmacy
+        // - Hospital pharmacy may not have stock
         if (prescriptions && prescriptions.length > 0) {
             await prisma.prescription.createMany({
                 data: prescriptions.map((p: any) => ({
@@ -188,9 +199,16 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
         }
 
         // 5. Generate Invoice
-        // Base consultation fee + extra items
+        // Base consultation fee from service catalog - MUST be configured by admin
         const consService = await prisma.service.findFirst({ where: { name: { contains: 'Consultation', mode: 'insensitive' } } });
-        const baseFee = consService?.price ?? 50.00;
+        
+        if (!consService) {
+            return res.status(400).json({ 
+                message: "Consultation fee not configured. Please contact admin to set up service pricing."
+            });
+        }
+        
+        const baseFee = consService.price;
 
         const invoiceItems = [
             { description: consService ? consService.name : "Consultation Fee", amount: baseFee, quantity: 1 },
@@ -201,7 +219,7 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
         
         const invoice = await prisma.invoice.create({
             data: {
-                invoiceNumber: `INV-${Date.now()}`,
+                invoiceNumber: generateInvoiceNumber('INV'),
                 patientId,
                 medicalRecordId: record.id,
                 items: invoiceItems,
