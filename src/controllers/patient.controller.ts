@@ -289,9 +289,19 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 };
 
 export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
+    let userId: string | undefined;
+    
     try {
-        const userId = req.user?.id;
-        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+        // Support multiple possible user ID locations
+        userId = req.user?.id || (req.user as any)?.userId || req.body?.userId;
+        console.log('Update profile - User ID:', userId);
+        console.log('Update profile - Full User object:', JSON.stringify(req.user));
+        console.log('Update profile - Headers:', req.headers.authorization?.substring(0, 50) + '...');
+        
+        if (!userId) {
+            console.log('No user ID found in request - headers:', req.headers.authorization?.substring(0, 50) + '...');
+            return res.status(401).json({ message: 'Unauthorized - No user ID' });
+        }
 
         const { 
             firstName, lastName, email, phone, 
@@ -304,7 +314,8 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
         });
 
         if (!existingPatient) {
-            return res.status(404).json({ message: 'Patient profile not found' });
+            console.log('No patient record found for userId:', userId);
+            return res.status(404).json({ message: 'Patient profile not found. Please contact support.' });
         }
 
         // Perform updates in a transaction
@@ -343,9 +354,10 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
             patient: updatedPatient
         });
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Update Profile Error:", error);
-        res.status(500).json({ message: 'Failed to update profile' });
+        console.error("Error stack:", error.stack);
+        res.status(500).json({ message: error.message || 'Failed to update profile' });
     }
 };
 
