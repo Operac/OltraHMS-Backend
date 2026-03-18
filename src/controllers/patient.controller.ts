@@ -308,6 +308,19 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
             address, bloodGroup, genotype, emergencyContact 
         } = req.body;
 
+        // Validate and sanitize genotype - convert empty strings to null
+        // Valid genotypes: AA, AS, SS, AC, SC
+        const validGenotypes = ['AA', 'AS', 'SS', 'AC', 'SC'];
+        const sanitizedGenotype = genotype && validGenotypes.includes(genotype.toUpperCase()) 
+            ? genotype.toUpperCase() 
+            : null;
+
+        // Validate bloodGroup if provided - convert to uppercase
+        const validBloodGroups = ['A_POSITIVE', 'A_NEGATIVE', 'B_POSITIVE', 'B_NEGATIVE', 'AB_POSITIVE', 'AB_NEGATIVE', 'O_POSITIVE', 'O_NEGATIVE'];
+        const sanitizedBloodGroup = bloodGroup && validBloodGroups.includes(bloodGroup.toUpperCase())
+            ? bloodGroup.toUpperCase()
+            : null;
+
         // First check if patient record exists
         const existingPatient = await prisma.patient.findFirst({
             where: { userId }
@@ -326,18 +339,19 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
                 data: { firstName, lastName, email }
             });
 
-            // 2. Update Patient Record using update (not updateMany) with the known ID
+            // 2. Update Patient Record - only include fields that have values
+            const patientData: any = {};
+            if (firstName !== undefined) patientData.firstName = firstName;
+            if (lastName !== undefined) patientData.lastName = lastName;
+            if (phone !== undefined) patientData.phone = phone;
+            if (address !== undefined) patientData.address = address;
+            if (sanitizedBloodGroup) patientData.bloodGroup = sanitizedBloodGroup;
+            if (sanitizedGenotype) patientData.genotype = sanitizedGenotype;
+            if (emergencyContact !== undefined) patientData.emergencyContact = emergencyContact;
+
             await tx.patient.update({
                 where: { id: existingPatient.id },
-                data: {
-                    firstName, 
-                    lastName,
-                    phone,
-                    address,
-                    bloodGroup,
-                    genotype,
-                    emergencyContact
-                }
+                data: patientData
             });
 
             return updatedUser;
