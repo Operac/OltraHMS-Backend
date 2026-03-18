@@ -2,6 +2,19 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { randomBytes } from 'crypto';
+import { z } from 'zod';
+import { PaymentMethod } from '@prisma/client';
+
+// Validation schema for processing payment
+const processPaymentSchema = z.object({
+    invoiceId: z.string().uuid({ message: 'Invalid invoice ID' }),
+    amount: z.union([
+        z.number().positive(),
+        z.string().transform((val) => parseFloat(val)).refine((val) => val > 0, { message: 'Amount must be positive' })
+    ]),
+    method: z.nativeEnum(PaymentMethod),
+    reference: z.string().optional()
+});
 
 // Helper function to generate unique invoice numbers
 const generateInvoiceNumber = (prefix: string): string => {
@@ -45,7 +58,12 @@ export const getPendingInvoices = async (req: AuthRequest, res: Response) => {
  */
 export const processPayment = async (req: AuthRequest, res: Response) => {
     try {
-        const { invoiceId, amount, method, reference } = req.body;
+        // Validate input with Zod
+        const validatedData = processPaymentSchema.parse(req.body);
+        const { invoiceId, amount, method, reference } = validatedData;
+        
+        // Get the numeric amount
+        const numericAmount = typeof amount === 'number' ? amount : parseFloat(amount);
 
         const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
         if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
@@ -55,7 +73,7 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
             const payment = await tx.payment.create({
                 data: {
                     invoiceId,
-                    amount: parseFloat(amount),
+                    amount: numericAmount,
                     method,
                     transactionReference: reference || `REF-${Date.now()}`,
                     status: 'COMPLETED',
@@ -64,7 +82,7 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
             });
 
             // 2. Update Invoice Status
-            const newAmountPaid = invoice.amountPaid + parseFloat(amount);
+            const newAmountPaid = invoice.amountPaid + numericAmount;
             const newBalance = invoice.total - newAmountPaid;
             
             const newStatus = newBalance <= 0 ? 'PAID' : 'PARTIAL';

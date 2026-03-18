@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { 
     getInsurancePolicies, 
     addInsurancePolicy, 
+    verifyInsurance,
     getMedicationAdherence, 
     logMedicationTaken, 
     rescheduleAppointment, 
@@ -50,6 +51,7 @@ router.post('/feedback', submitFeedback);
 // Insurance
 router.get('/insurance', getInsurancePolicies);
 router.post('/insurance', addInsurancePolicy);
+router.patch('/insurance/:insuranceId/verify', verifyInsurance);
 
 // Medications
 router.get('/medications/adherence', getMedicationAdherence);

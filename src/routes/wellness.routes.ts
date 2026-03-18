@@ -1,6 +1,7 @@
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
+import { prisma } from '../lib/prisma';
 import { 
     getMyGoals, 
     createGoal, 
@@ -58,14 +59,44 @@ router.delete('/medications/:id', deleteMedication);
 // Mood
 router.get('/moods', getMyMoods);
 router.post('/moods', recordMood);
+router.delete('/moods/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await prisma.wellnessMood.delete({ where: { id } });
+        res.json({ message: 'Mood entry deleted' });
+    } catch (error) {
+        console.error('Error deleting mood:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
 
 // Sleep
 router.get('/sleep', getMySleep);
 router.post('/sleep', recordSleep);
+router.delete('/sleep/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await prisma.wellnessSleep.delete({ where: { id } });
+        res.json({ message: 'Sleep entry deleted' });
+    } catch (error) {
+        console.error('Error deleting sleep:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
 
 // Symptoms
 router.get('/symptoms', getMySymptoms);
 router.post('/symptoms', recordSymptom);
+router.delete('/symptoms/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await prisma.wellnessSymptom.delete({ where: { id } });
+        res.json({ message: 'Symptom entry deleted' });
+    } catch (error) {
+        console.error('Error deleting symptom:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
 
 // Reminders
 router.get('/reminders', getMyReminders);

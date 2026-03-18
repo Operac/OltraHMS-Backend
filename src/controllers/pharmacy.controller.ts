@@ -2,6 +2,12 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { randomBytes } from 'crypto';
+import { z } from 'zod';
+
+// Validation schema for prescription availability check
+const checkAvailabilitySchema = z.object({
+    prescriptionIds: z.array(z.string().uuid({ message: 'Invalid prescription ID' })).min(1, { message: 'At least one prescription ID required' }).max(50, { message: 'Maximum 50 prescriptions allowed' })
+});
 
 // Helper function to generate unique invoice numbers
 const generateInvoiceNumber = (prefix: string): string => {
@@ -16,12 +22,9 @@ const generateInvoiceNumber = (prefix: string): string => {
  */
 export const checkPrescriptionAvailability = async (req: AuthRequest, res: Response) => {
     try {
-        const { prescriptionIds } = req.body;
+        // Validate input with Zod
+        const { prescriptionIds } = checkAvailabilitySchema.parse(req.body);
         
-        if (!prescriptionIds || !Array.isArray(prescriptionIds)) {
-            return res.status(400).json({ message: 'prescriptionIds array required' });
-        }
-
         const results = await Promise.all(prescriptionIds.map(async (prescriptionId: string) => {
             const prescription = await prisma.prescription.findUnique({
                 where: { id: prescriptionId },
@@ -258,11 +261,21 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
                 if (!batch) throw new Error(`Batch ${batchId} not found`);
                 if (batch.quantity < quantity) throw new Error(`Insufficient stock in Batch ${batch.batchNumber}`);
 
-                // 2. Deduct Stock
-                await tx.inventoryBatch.update({
-                    where: { id: batchId },
-                    data: { quantity: batch.quantity - quantity }
+                // 2. Deduct Stock with optimistic locking (conditional update)
+                // This prevents race conditions by ensuring quantity is still sufficient
+                const batchToUpdateId = batchId || batch.id;
+                const updatedBatch = await tx.inventoryBatch.updateMany({
+                    where: { 
+                        id: batchToUpdateId,
+                        quantity: { gte: quantity } // Only update if sufficient quantity available
+                    },
+                    data: { quantity: { decrement: quantity } }
                 });
+
+                // Check if update was successful (row count = 0 means concurrent modification)
+                if (updatedBatch.count === 0) {
+                    throw new Error(`Concurrent modification detected for batch ${batch.batchNumber}. Please retry.`);
+                }
 
                 // 3. Record Dispensing (1 Prescription = 1 Medication)
                 await tx.dispensing.create({

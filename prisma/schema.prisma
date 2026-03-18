@@ -210,6 +210,7 @@ model User {
   
   resetToken       String?
   resetTokenExpiry DateTime?
+  lastResetIp      String?   // IP address used when requesting password reset
   
   failedLoginAttempts Int       @default(0)
   lockoutUntil        DateTime?
@@ -318,13 +319,16 @@ model PatientInsurance {
   patientId       String
   patient         Patient  @relation(fields: [patientId], references: [id])
   
-  provider        String
+  provider        String   // HMO name e.g., "Hygeia", "AIICO", "National Health"
+  planName        String?  // Plan type e.g., "Gold", "Silver", "Family", "Individual"
   policyNumber    String
-  coverageDetails Json?
+  coverageDetails Json?    // { annualLimit, monthlyLimit, copay, servicesCovered[] }
   isPrimary       Boolean  @default(true)
   
   status          InsuranceStatus @default(PENDING)
   verificationNote String?
+  verifiedBy       String?  // Staff ID who verified
+  verifiedAt      DateTime?
   
   validFrom       DateTime?
   validUntil      DateTime?

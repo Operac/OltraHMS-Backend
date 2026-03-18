@@ -127,13 +127,47 @@ export const getPatients = async (req: Request, res: Response) => {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { user: { select: { email: true, status: true } } }
+        include: { 
+          user: { select: { email: true, status: true } },
+          appointments: {
+            orderBy: { appointmentDate: 'desc' },
+            take: 1,
+            select: { appointmentDate: true }
+          },
+          admissions: {
+            orderBy: { admissionDate: 'desc' },
+            take: 1,
+            select: { admissionDate: true, dischargeDate: true }
+          }
+        }
       }),
       prisma.patient.count({ where: whereClause }),
     ]);
 
+    // Transform data to include lastVisit
+    const transformedPatients = patients.map(patient => {
+      // Find the most recent date from appointments or admissions
+      const lastAppointment = patient.appointments[0]?.appointmentDate;
+      const lastAdmission = patient.admissions[0]?.admissionDate;
+      
+      let lastVisit = null;
+      if (lastAppointment && lastAdmission) {
+        lastVisit = new Date(lastAppointment) > new Date(lastAdmission) ? lastAppointment : lastAdmission;
+      } else if (lastAppointment) {
+        lastVisit = lastAppointment;
+      } else if (lastAdmission) {
+        lastVisit = lastAdmission;
+      }
+
+      const { appointments, admissions, ...rest } = patient as any;
+      return {
+        ...rest,
+        lastVisit: lastVisit ? lastVisit.toISOString() : null
+      };
+    });
+
     res.json({
-      data: patients,
+      data: transformedPatients,
       meta: {
         total,
         page,
@@ -264,6 +298,15 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
             address, bloodGroup, genotype, emergencyContact 
         } = req.body;
 
+        // First check if patient record exists
+        const existingPatient = await prisma.patient.findFirst({
+            where: { userId }
+        });
+
+        if (!existingPatient) {
+            return res.status(404).json({ message: 'Patient profile not found' });
+        }
+
         // Perform updates in a transaction
         const result = await prisma.$transaction(async (tx) => {
             // 1. Update User Record
@@ -272,10 +315,9 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
                 data: { firstName, lastName, email }
             });
 
-            // 2. Update Patient Record
-            // using findFirst to get ID then update could be safer but updateMany by userId works if 1:1
-            await tx.patient.updateMany({
-                where: { userId },
+            // 2. Update Patient Record using update (not updateMany) with the known ID
+            await tx.patient.update({
+                where: { id: existingPatient.id },
                 data: {
                     firstName, 
                     lastName,
@@ -290,7 +332,16 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
             return updatedUser;
         });
 
-        res.json({ message: 'Profile updated successfully', user: result });
+        // Fetch the updated patient to return complete data
+        const updatedPatient = await prisma.patient.findUnique({
+            where: { id: existingPatient.id }
+        });
+
+        res.json({ 
+            message: 'Profile updated successfully', 
+            user: result,
+            patient: updatedPatient
+        });
 
     } catch (error) {
         console.error("Update Profile Error:", error);

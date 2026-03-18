@@ -8,7 +8,9 @@ const router = Router();
 router.use(authenticate as any);
 
 router.get('/patient/me', authorize([Role.PATIENT]) as any, getPatientInvoices as any);
-router.get('/:id', getInvoiceById as any);
-router.post('/pay', processPayment as any);
+// Invoice by ID - accessible by staff (for viewing) and patient (if it's their invoice)
+router.get('/:id', authorize([Role.ADMIN, Role.ACCOUNTANT, Role.RECEPTIONIST, Role.DOCTOR, Role.NURSE]) as any, getInvoiceById as any);
+// Process payment - staff only
+router.post('/pay', authorize([Role.ADMIN, Role.ACCOUNTANT, Role.RECEPTIONIST]) as any, processPayment as any);
 
 export default router;

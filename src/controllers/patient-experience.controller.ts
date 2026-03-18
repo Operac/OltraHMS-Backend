@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { AppointmentStatus, PrescriptionStatus } from '@prisma/client';
+import { AppointmentStatus, PrescriptionStatus, Role } from '@prisma/client';
 import { generateJitsiToken, generateRoomName, getJitsiConfig } from '../services/jitsi.service';
 
 // Helper to get patient context
@@ -90,15 +90,31 @@ export const requestRefill = async (req: AuthRequest, res: Response) => {
         if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
         if (prescription.refills <= 0) return res.status(400).json({ message: 'No refills remaining' });
         
-        await prisma.notification.create({
-            data: {
-                userId: (await prisma.staff.findFirst({ where: { medicalRecords: { some: { id: prescription.medicalRecordId } } }, include: { user: true } }))?.userId || "",
-                message: `Refill requested for ${prescription.medicationName} by ${patient.firstName} ${patient.lastName}`,
-                channel: "IN_APP",
-                priority: "MEDIUM",
-                status: "PENDING"
-            }
+        // Find the prescribing doctor or default to any pharmacist
+        let targetStaff = await prisma.staff.findFirst({ 
+            where: { medicalRecords: { some: { id: prescription.medicalRecordId } } } 
         });
+        
+        // If no prescribing doctor found, find a pharmacist
+        if (!targetStaff) {
+            targetStaff = await prisma.staff.findFirst({ 
+                where: { user: { role: Role.PHARMACIST } },
+                orderBy: { createdAt: 'asc' }
+            });
+        }
+        
+        // Only create notification if we found a valid staff member
+        if (targetStaff) {
+            await prisma.notification.create({
+                data: {
+                    userId: targetStaff.userId,
+                    message: `Refill requested for ${prescription.medicationName} by ${patient.firstName} ${patient.lastName}`,
+                    channel: "IN_APP",
+                    priority: "MEDIUM",
+                    status: "PENDING"
+                }
+            });
+        }
 
         res.json({ message: 'Refill request submitted' });
     } catch (error: any) {
@@ -216,20 +232,51 @@ export const getInsurancePolicies = async (req: AuthRequest, res: Response) => {
 export const addInsurancePolicy = async (req: AuthRequest, res: Response) => {
     try {
         const patient = await getPatientContext(req.user!.id);
-        const { provider, policyNumber, isPrimary } = req.body;
+        const { provider, policyNumber, planName, isPrimary, validFrom, validUntil, coverageDetails } = req.body;
         
         const policy = await prisma.patientInsurance.create({
             data: {
                 patientId: patient.id,
                 provider,
                 policyNumber,
+                planName: planName || 'Standard',
                 isPrimary: isPrimary || false,
-                status: 'PENDING'
+                status: 'PENDING',
+                validFrom: validFrom ? new Date(validFrom) : null,
+                validUntil: validUntil ? new Date(validUntil) : null,
+                coverageDetails
             }
         });
         res.status(201).json(policy);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to add insurance' });
+    }
+};
+
+// Verify insurance (admin/reception)
+export const verifyInsurance = async (req: AuthRequest, res: Response) => {
+    try {
+        const insuranceId = req.params.insuranceId as string;
+        const { status, verificationNote } = req.body;
+        const userId = req.user?.id;
+        
+        if (!insuranceId) {
+            return res.status(400).json({ message: 'Insurance ID is required' });
+        }
+        
+        const policy = await prisma.patientInsurance.update({
+            where: { id: insuranceId },
+            data: {
+                status,
+                verificationNote,
+                verifiedBy: userId,
+                verifiedAt: new Date()
+            }
+        });
+        
+        res.json(policy);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to verify insurance' });
     }
 };
 

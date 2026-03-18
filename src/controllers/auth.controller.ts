@@ -11,11 +11,17 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypt
 
 import { prisma } from '../lib/prisma';
 
-// Encryption key derived from JWT_SECRET for 2FA secrets
+// Encryption key for 2FA secrets - must be a 32-byte hex string (64 chars)
+// Generate with: crypto.randomBytes(32).toString('hex')
 const getEncryptionKey = (): Buffer => {
-    const secret = process.env.JWT_SECRET;
+    const secret = process.env.ENCRYPTION_SECRET;
     if (!secret) {
-        throw new Error("JWT_SECRET environment variable is required");
+        throw new Error("ENCRYPTION_SECRET environment variable is required for 2FA");
+    }
+    // If the secret is exactly 64 hex chars (32 bytes), use it directly
+    // Otherwise, hash it to get a consistent 32-byte key
+    if (/^[a-f0-9]{64}$/i.test(secret)) {
+        return Buffer.from(secret, 'hex');
     }
     return createHash('sha256').update(secret).digest();
 };
@@ -210,12 +216,16 @@ export const resetPasswordRequest = async (req: Request, res: Response) => {
         if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not defined");
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
         
-        // Save token to DB ? Or just statless verify. 
-        // Better to save hash of token to invalidate used ones, but strictly verifying signature works for MVP.
-        // We added resetToken to schema, so let's use it.
+        // Store reset token with IP address for validation
+        const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
         await prisma.user.update({
             where: { id: user.id },
-            data: { resetToken: token, resetTokenExpiry: new Date(Date.now() + 3600000) }
+            data: { 
+                resetToken: token, 
+                resetTokenExpiry: new Date(Date.now() + 3600000),
+                // Store IP for validation (in production, consider encrypting this)
+                lastResetIp: clientIp
+            }
         });
 
         await sendPasswordResetEmail(user.email, token);
@@ -250,6 +260,17 @@ export const resetPasswordConfirm = async (req: Request, res: Response) => {
             return res.status(400).json({ message: 'Invalid or expired reset token' });
         }
 
+        // Validate IP address (optional security measure)
+        // Only enforce if the user previously had an IP recorded
+        if (user.lastResetIp) {
+            const currentIp = req.ip || req.socket.remoteAddress || 'unknown';
+            // For now, we log IP mismatch but don't block (to handle proxy/load balancer issues)
+            // In production, you might want to be stricter
+            if (currentIp !== user.lastResetIp) {
+                console.warn(`Password reset IP mismatch: stored=${user.lastResetIp}, current=${currentIp}`);
+            }
+        }
+
         // Hash new password
         const passwordHash = await bcrypt.hash(newPassword, 12);
 
@@ -259,7 +280,8 @@ export const resetPasswordConfirm = async (req: Request, res: Response) => {
             data: {
                 passwordHash,
                 resetToken: null,
-                resetTokenExpiry: null
+                resetTokenExpiry: null,
+                lastResetIp: null // Clear the stored IP after use
             }
         });
 
