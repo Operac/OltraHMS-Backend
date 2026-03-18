@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { InsuranceStatus } from '@prisma/client';
-import { 
+import bcrypt from 'bcryptjs';
+import {  
     notifyPatientCheckedIn, 
     notifyPatientCalled, 
     notifyPatientWithDoctor, 
@@ -235,9 +236,66 @@ export const checkInPatient = async (req: AuthRequest, res: Response) => {
 // Add walk-in
 export const addWalkIn = async (req: AuthRequest, res: Response) => {
     try {
-        const { patientId, doctorId, reason, priority } = req.body;
-        const patient = await prisma.patient.findUnique({ where: { id: patientId } });
-        if (!patient) return res.status(404).json({ message: 'Patient not found' });
+        const { patientId, doctorId, reason, priority, patientData } = req.body;
+        
+        let patient;
+        
+        // If patientId provided, look up existing patient
+        if (patientId) {
+            patient = await prisma.patient.findUnique({ where: { id: patientId } });
+            if (!patient) return res.status(404).json({ message: 'Patient not found' });
+        } 
+        // If patientData provided, create new patient
+        else if (patientData) {
+            const { firstName, lastName, phone, email, dateOfBirth, gender } = patientData;
+            
+            if (!firstName || !lastName || !phone) {
+                return res.status(400).json({ message: 'Name and phone number are required for new patients' });
+            }
+            
+            // Check if patient with same phone exists
+            const existingPatient = await prisma.patient.findFirst({ where: { phone } });
+            if (existingPatient) {
+                return res.status(400).json({ 
+                    message: 'A patient with this phone number already exists',
+                    existingPatientId: existingPatient.id,
+                    existingPatientName: `${existingPatient.firstName} ${existingPatient.lastName}`
+                });
+            }
+            
+            // Generate patient number
+            const patientNumber = `HMS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+            
+            // Create user first
+            const tempPassword = Math.random().toString(36).slice(-8);
+            const hashedPassword = await bcrypt.hash(tempPassword, 12);
+            
+            const user = await prisma.user.create({
+                data: {
+                    email: email || `${phone}@oltra.local`,
+                    passwordHash: hashedPassword,
+                    firstName,
+                    lastName,
+                    role: 'PATIENT',
+                    status: 'ACTIVE'
+                }
+            });
+            
+            // Create patient
+            patient = await prisma.patient.create({
+                data: {
+                    userId: user.id,
+                    patientNumber,
+                    firstName,
+                    lastName,
+                    phone,
+                    ...(dateOfBirth && { dateOfBirth: new Date(dateOfBirth) }),
+                    ...(gender && { gender })
+                }
+            });
+        } else {
+            return res.status(400).json({ message: 'Either patientId or patientData is required' });
+        }
         
         if (!doctorId) return res.status(400).json({ message: 'Doctor ID required' });
 
@@ -254,7 +312,7 @@ export const addWalkIn = async (req: AuthRequest, res: Response) => {
 
         const appointment = await prisma.appointment.create({
             data: {
-                patientId, doctorId,
+                patientId: patient.id, doctorId,
                 appointmentDate: today,
                 startTime: new Date(),
                 endTime: new Date(Date.now() + 30 * 60000),
@@ -263,7 +321,12 @@ export const addWalkIn = async (req: AuthRequest, res: Response) => {
             },
         });
 
-        res.status(201).json({ message: 'Walk-in added', appointment, queuePosition });
+        res.status(201).json({ 
+            message: 'Walk-in added', 
+            appointment, 
+            queuePosition,
+            patient: { id: patient.id, firstName: patient.firstName, lastName: patient.lastName, patientNumber: patient.patientNumber }
+        });
     } catch (error) {
         res.status(500).json({ message: 'Failed to add walk-in' });
     }
