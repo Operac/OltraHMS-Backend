@@ -5,6 +5,7 @@ import {
     getMyGoals, 
     createGoal, 
     checkInGoal,
+    deleteGoal,
     getMyVitals,
     recordVitals,
     deleteVitals,
@@ -40,6 +41,7 @@ router.use(authenticate);
 router.get('/goals', getMyGoals);
 router.post('/goals', createGoal);
 router.patch('/goals/:id/checkin', checkInGoal);
+router.delete('/goals/:id', deleteGoal);
 
 // Vitals
 router.get('/vitals', getMyVitals);

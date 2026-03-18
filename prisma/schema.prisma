@@ -428,6 +428,11 @@ model Staff {
   isDeleted          Boolean        @default(false)
   deletedAt         DateTime?
   
+  // Telemedicine Availability
+  telemedicineAvailable Boolean  @default(false)
+  telemedicineStartTime String   @default("09:00")    // HH:mm format
+  telemedicineEndTime   String   @default("17:00")    // HH:mm format
+  
   // Radiology
   doctorRadiologyRequests RadiologyRequest[] @relation("DoctorRequests")
   radiologistReports      RadiologyReport[]  @relation("RadiologistReports")
@@ -1282,6 +1287,50 @@ model Message {
   channel     String   // "general", "doctors", "nurses"
   
   createdAt   DateTime @default(now())
+}
+
+// Hospital Settings
+model HospitalSettings {
+  id                  String   @id @default(uuid())
+  
+  // Regular Hospital Hours (for in-person appointments)
+  // Each day can be configured as open/closed and with specific hours
+  mondayOpen          String   @default("08:00")    // HH:mm format
+  mondayClose         String   @default("17:00")
+  mondayIsOpen        Boolean  @default(true)
+  
+  tuesdayOpen         String   @default("08:00")
+  tuesdayClose        String   @default("17:00")
+  tuesdayIsOpen       Boolean  @default(true)
+  
+  wednesdayOpen       String   @default("08:00")
+  wednesdayClose      String   @default("17:00")
+  wednesdayIsOpen     Boolean  @default(true)
+  
+  thursdayOpen        String   @default("08:00")
+  thursdayClose       String   @default("17:00")
+  thursdayIsOpen      Boolean  @default(true)
+  
+  fridayOpen          String   @default("08:00")
+  fridayClose         String   @default("17:00")
+  fridayIsOpen        Boolean  @default(true)
+  
+  saturdayOpen        String   @default("09:00")
+  saturdayClose       String   @default("13:00")
+  saturdayIsOpen      Boolean  @default(true)
+  
+  sundayOpen          String   @default("00:00")     // Closed by default
+  sundayClose         String   @default("00:00")
+  sundayIsOpen        Boolean  @default(false)
+  
+  // Telemedicine Hours (can be 24 hours)
+  telemedicineEnabled Boolean  @default(true)
+  telemedicineStart   String   @default("00:00")     // 24-hour format
+  telemedicineEnd     String   @default("23:59")
+  telemedicine24Hours Boolean  @default(true)        // If true, telemedicine is 24/7
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 

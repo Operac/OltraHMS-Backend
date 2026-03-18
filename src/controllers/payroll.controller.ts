@@ -139,3 +139,40 @@ export const markAsPaid = async (req: AuthRequest, res: Response) => {
         res.status(500).json({ message: 'Failed to update payroll status', error });
     }
 };
+
+/**
+ * Update Payroll (bonuses, deductions)
+ */
+export const updatePayroll = async (req: AuthRequest, res: Response) => {
+    try {
+        const id = String(req.params.id);
+        const { bonuses, deductions, tax } = req.body;
+
+        // Get current payroll to recalculate net
+        const current = await prisma.payroll.findUnique({ where: { id } });
+        if (!current) {
+            return res.status(404).json({ message: 'Payroll not found' });
+        }
+
+        const newBonuses = bonuses !== undefined ? Number(bonuses) : current.bonuses;
+        const newDeductions = deductions !== undefined ? Number(deductions) : current.deductions;
+        const newTax = tax !== undefined ? Number(tax) : current.tax;
+
+        const netSalary = current.baseSalary + newBonuses - newDeductions - newTax;
+
+        const updated = await prisma.payroll.update({
+            where: { id },
+            data: {
+                bonuses: newBonuses,
+                deductions: newDeductions,
+                tax: newTax,
+                netSalary
+            }
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error("Update Payroll Error:", error);
+        res.status(500).json({ message: 'Failed to update payroll' });
+    }
+};

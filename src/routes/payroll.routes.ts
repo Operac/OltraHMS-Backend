@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generatePayroll, getPayrolls, getMyPayrolls, markAsPaid } from '../controllers/payroll.controller';
+import { generatePayroll, getPayrolls, getMyPayrolls, markAsPaid, updatePayroll } from '../controllers/payroll.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -10,6 +10,7 @@ router.get('/my', authenticate, getMyPayrolls);
 // Admin / HR Actions
 router.post('/generate', authenticate, authorize(['ADMIN', 'ACCOUNTANT']), generatePayroll);
 router.get('/', authenticate, authorize(['ADMIN', 'ACCOUNTANT']), getPayrolls);
+router.patch('/:id', authenticate, authorize(['ADMIN', 'ACCOUNTANT']), updatePayroll);
 router.patch('/:id/pay', authenticate, authorize(['ADMIN', 'ACCOUNTANT']), markAsPaid);
 
 export default router;

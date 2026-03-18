@@ -20,8 +20,8 @@ import receptionistRoutes from './routes/receptionist.routes';
 import publicRoutes from './routes/public.routes';
 
 import { setupSocketHandlers } from './socket/socket.handler';
-import { initializeSocket, notifyAppointment, notifyNewMessage, notifyLabResult, notifyPrescription } from './services/notification.service';
 import videoRoutes from './routes/video.routes';
+import chatRoutes from './routes/chat.routes';
 import notificationRoutes from './routes/notification.routes';
 
 // Existing imports...
@@ -38,7 +38,7 @@ import payrollRoutes from './routes/payroll.routes';
 import leaveRoutes from './routes/leave.routes';
 import radiologyRoutes from './routes/radiology.routes';
 import surgeryRoutes from './routes/surgery.routes';
-import chatRoutes from './routes/chat.routes';
+import settingsRoutes from './routes/settings.routes';
 import wellnessRoutes from './routes/wellness.routes';
 import patientExperienceRoutes from './routes/patient-experience.routes';
 
@@ -112,6 +112,7 @@ app.use('/api/leaves', leaveRoutes);
 app.use('/api/radiology', radiologyRoutes);
 app.use('/api/surgery', surgeryRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/wellness', wellnessRoutes);
 app.use('/api/admissions', admissionRoutes);
 app.use('/api/wards', wardRoutes);

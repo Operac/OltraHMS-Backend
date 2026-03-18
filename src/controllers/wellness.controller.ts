@@ -121,6 +121,41 @@ export const checkInGoal = async (req: AuthRequest, res: Response) => {
     }
 };
 
+/**
+ * Delete Goal
+ */
+export const deleteGoal = async (req: AuthRequest, res: Response) => {
+    try {
+        if (!req.user || req.user.role !== 'PATIENT') {
+            return res.status(403).json({ message: 'Patient access only' });
+        }
+
+        const { id } = req.params;
+
+        const patient = await prisma.patient.findUnique({
+            where: { userId: req.user.id }
+        });
+
+        if (!patient) return res.status(404).json({ message: 'Patient profile not found' });
+
+        // Verify the goal belongs to this patient
+        const goal = await prisma.wellnessGoal.findFirst({
+            where: { id: String(id), patientId: patient.id }
+        });
+
+        if (!goal) return res.status(404).json({ message: 'Goal not found' });
+
+        await prisma.wellnessGoal.delete({
+            where: { id: String(id) }
+        });
+
+        res.json({ message: 'Goal deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting goal:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 // =============================================================================
 // VITALS CONTROLLERS
 // =============================================================================
