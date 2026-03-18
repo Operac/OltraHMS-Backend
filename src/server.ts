@@ -67,7 +67,9 @@ const io: any = new Server(httpServer, {
             process.env.FRONTEND_URL || "http://localhost:5173", 
             "http://localhost:5173", 
             "http://localhost:3000",
-            "http://localhost:5174"
+            "http://localhost:5174",
+            "https://oltra-hms-frontend.vercel.app",
+            "https://oltrahms-backend.onrender.com"
         ],
         methods: ["GET", "POST"],
         credentials: true
@@ -116,8 +118,8 @@ const allowedOrigins = isDevelopment
         "http://localhost:5174"
       ]
     : process.env.FRONTEND_URL
-      ? [process.env.FRONTEND_URL]
-      : [];
+      ? [process.env.FRONTEND_URL, "https://oltra-hms-frontend.vercel.app"]
+      : ["https://oltra-hms-frontend.vercel.app"];
 
 app.use(cors({
     origin: allowedOrigins,

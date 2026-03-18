@@ -1,9 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate } from '../middleware/auth.middleware';
+import { getDoctorDashboardStats } from '../controllers/doctor.controller';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// GET /api/doctor/dashboard/stats - Get doctor's dashboard stats
+router.get('/dashboard/stats', authenticate, getDoctorDashboardStats);
 
 // PUT /api/doctor/telemedicine - Update doctor's telemedicine availability
 router.put('/telemedicine', authenticate, async (req: Request, res: Response) => {
