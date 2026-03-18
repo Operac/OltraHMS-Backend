@@ -27,6 +27,8 @@ router.get('/hospital', async (req: Request, res: Response) => {
 router.put('/hospital', async (req: Request, res: Response) => {
   try {
     const {
+      currencyCode,
+      currencySymbol,
       mondayOpen, mondayClose,
       tuesdayOpen, tuesdayClose,
       wednesdayOpen, wednesdayClose,
@@ -45,6 +47,8 @@ router.put('/hospital', async (req: Request, res: Response) => {
       settings = await prisma.hospitalSettings.update({
         where: { id: settings.id },
         data: {
+          currencyCode,
+          currencySymbol,
           mondayOpen, mondayClose,
           tuesdayOpen, tuesdayClose,
           wednesdayOpen, wednesdayClose,
@@ -60,6 +64,8 @@ router.put('/hospital', async (req: Request, res: Response) => {
     } else {
       settings = await prisma.hospitalSettings.create({
         data: {
+          currencyCode,
+          currencySymbol,
           mondayOpen, mondayClose,
           tuesdayOpen, tuesdayClose,
           wednesdayOpen, wednesdayClose,

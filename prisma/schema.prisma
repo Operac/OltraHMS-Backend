@@ -1293,6 +1293,10 @@ model Message {
 model HospitalSettings {
   id                  String   @id @default(uuid())
   
+  // Currency Settings
+  currencyCode        String   @default("NGN")      // NGN, USD, EUR, etc.
+  currencySymbol      String   @default("₦")        // ₦, $, €, etc.
+   
   // Regular Hospital Hours (for in-person appointments)
   // Each day can be configured as open/closed and with specific hours
   mondayOpen          String   @default("08:00")    // HH:mm format
