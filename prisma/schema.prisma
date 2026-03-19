@@ -62,6 +62,15 @@ enum EmploymentStatus {
   TERMINATED
 }
 
+// Staff Daily Status - for Layer 2 availability override
+enum StaffDailyStatus {
+  AVAILABLE
+  UNAVAILABLE
+  ON_LEAVE
+  IN_SURGERY
+  SEEING_PATIENTS
+}
+
 enum AppointmentType {
   FIRST_VISIT
   FOLLOW_UP
@@ -437,6 +446,32 @@ model Staff {
   telemedicineStartTime String   @default("09:00")    // HH:mm format
   telemedicineEndTime   String   @default("17:00")    // HH:mm format
   
+  // Weekly Schedule (Layer 1 - Admin sets per doctor)
+  mondayIsOpen    Boolean @default(true)
+  mondayStart     String  @default("08:00")
+  mondayEnd       String  @default("16:00")
+  tuesdayIsOpen   Boolean @default(true)
+  tuesdayStart    String  @default("08:00")
+  tuesdayEnd      String  @default("16:00")
+  wednesdayIsOpen Boolean @default(true)
+  wednesdayStart  String  @default("08:00")
+  wednesdayEnd    String  @default("16:00")
+  thursdayIsOpen  Boolean @default(true)
+  thursdayStart   String  @default("08:00")
+  thursdayEnd     String  @default("16:00")
+  fridayIsOpen    Boolean @default(true)
+  fridayStart     String  @default("08:00")
+  fridayEnd       String  @default("16:00")
+  saturdayIsOpen  Boolean @default(false)
+  saturdayStart   String  @default("09:00")
+  saturdayEnd     String  @default("13:00")
+  sundayIsOpen    Boolean @default(false)
+  sundayStart     String  @default("09:00")
+  sundayEnd       String  @default("13:00")
+  
+  // Daily availability overrides (Layer 2 - Doctor/Nurse sets)
+  dailyAvailabilities StaffDailyAvailability[]
+  
   // Radiology
   doctorRadiologyRequests RadiologyRequest[] @relation("DoctorRequests")
   radiologistReports      RadiologyReport[]  @relation("RadiologistReports")
@@ -458,6 +493,20 @@ model Department {
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Staff Daily Availability - Layer 2 (Daily override)
+model StaffDailyAvailability {
+  id          String   @id @default(uuid())
+  staffId     String
+  staff       Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  date        DateTime // Specific date for the override
+  status      StaffDailyStatus @default(AVAILABLE)
+  reason      String?  // Optional reason (e.g., "In surgery", "Personal leave")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([staffId, date]) // One override per staff per day
 }
 
 model Appointment {
@@ -1300,6 +1349,9 @@ model HospitalSettings {
   // Currency Settings
   currencyCode        String   @default("NGN")      // NGN, USD, EUR, etc.
   currencySymbol      String   @default("₦")        // ₦, $, €, etc.
+   
+  // Appointment Time Slot Settings
+  timeSlotDuration    Int      @default(30)        // Duration in minutes (15, 30, 60)
    
   // Regular Hospital Hours (for in-person appointments)
   // Each day can be configured as open/closed and with specific hours

@@ -111,10 +111,21 @@ router.get('/available', async (req: Request, res: Response) => {
     // Filter doctors based on their telemedicine hours if applicable
     let filteredDoctors = doctors;
     if (type === 'TELEHEALTH') {
+      // Use hospital telemedicine settings as fallback
+      const hospitalTelemedicineEnabled = settings?.telemedicineEnabled ?? true;
+      const hospitalTelemedicine24Hours = settings?.telemedicine24Hours ?? true;
+      const hospitalTelemedicineStart = settings?.telemedicineStart || '00:00';
+      const hospitalTelemedicineEnd = settings?.telemedicineEnd || '23:59';
+      
       filteredDoctors = doctors.filter((doctor: any) => {
         if (!doctor.telemedicineAvailable) return false;
-        const startTime = doctor.telemedicineStartTime || '09:00';
-        const endTime = doctor.telemedicineEndTime || '17:00';
+        
+        // If hospital is 24/7, allow all times
+        if (hospitalTelemedicine24Hours) return true;
+        
+        // Use doctor's hours if set, otherwise fall back to hospital hours
+        const startTime = doctor.telemedicineStartTime || hospitalTelemedicineStart;
+        const endTime = doctor.telemedicineEndTime || hospitalTelemedicineEnd;
         return currentTime >= startTime && currentTime <= endTime;
       });
     }
