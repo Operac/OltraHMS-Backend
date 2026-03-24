@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { Request, Response } from 'express';
 import { AppointmentStatus } from '@prisma/client';
 
@@ -6,19 +6,19 @@ import { AppointmentStatus } from '@prisma/client';
 vi.mock('../lib/prisma', () => ({
   prisma: {
     appointment: {
-      findFirst: jest.fn(),
-      create: jest.fn(),
-      findUnique: jest.fn(),
-      findMany: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
     },
     staff: {
-      findUnique: jest.fn(),
+      findUnique: vi.fn(),
     },
     patient: {
-      findUnique: jest.fn(),
-      findFirst: jest.fn(),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
   },
 }));
@@ -76,20 +76,20 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.body = validAppointmentData;
       
-      (prisma.staff.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.staff.findUnique as Mock).mockResolvedValue({
         id: 'doctor-123',
         user: { firstName: 'John', lastName: 'Doe' }
       });
       
-      (prisma.patient.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.patient.findUnique as Mock).mockResolvedValue({
         id: 'patient-123',
         firstName: 'Jane',
         lastName: 'Smith'
       });
       
-      (prisma.appointment.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.appointment.findFirst as Mock).mockResolvedValue(null);
       
-      (prisma.appointment.create as jest.Mock).mockResolvedValue({
+      (prisma.appointment.create as Mock).mockResolvedValue({
         id: 'apt-123',
         ...validAppointmentData,
         status: AppointmentStatus.CONFIRMED,
@@ -128,7 +128,7 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.body = validAppointmentData;
       
-      (prisma.staff.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.staff.findUnique as Mock).mockResolvedValue(null);
 
       // Act
       await createAppointment(mockRequest as AuthRequest, mockResponse as Response);
@@ -144,10 +144,10 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.body = validAppointmentData;
       
-      (prisma.staff.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.staff.findUnique as Mock).mockResolvedValue({
         id: 'doctor-123',
       });
-      (prisma.patient.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.patient.findUnique as Mock).mockResolvedValue(null);
 
       // Act
       await createAppointment(mockRequest as AuthRequest, mockResponse as Response);
@@ -163,17 +163,17 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.body = validAppointmentData;
       
-      (prisma.staff.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.staff.findUnique as Mock).mockResolvedValue({
         id: 'doctor-123',
         user: { firstName: 'John', lastName: 'Doe' }
       });
       
-      (prisma.patient.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.patient.findUnique as Mock).mockResolvedValue({
         id: 'patient-123',
       });
       
       // Return existing appointment (conflict)
-      (prisma.appointment.findFirst as jest.Mock).mockResolvedValue({
+      (prisma.appointment.findFirst as Mock).mockResolvedValue({
         id: 'existing-apt',
       });
 
@@ -195,10 +195,10 @@ describe('Appointment Controller', () => {
         endTime: '2024-03-20T10:00:00Z', // End before start
       };
       
-      (prisma.staff.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.staff.findUnique as Mock).mockResolvedValue({
         id: 'doctor-123',
       });
-      (prisma.patient.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.patient.findUnique as Mock).mockResolvedValue({
         id: 'patient-123',
       });
 
@@ -223,7 +223,7 @@ describe('Appointment Controller', () => {
         { id: 'apt-2', patientId: 'p2', doctorId: 'd2' },
       ];
       
-      (prisma.appointment.findMany as jest.Mock).mockResolvedValue(mockAppointments);
+      (prisma.appointment.findMany as Mock).mockResolvedValue(mockAppointments);
 
       // Act
       await getAppointments(mockRequest as AuthRequest, mockResponse as Response);
@@ -237,7 +237,7 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.query = { date: '2024-03-20' };
       
-      (prisma.appointment.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.appointment.findMany as Mock).mockResolvedValue([]);
 
       // Act
       await getAppointments(mockRequest as AuthRequest, mockResponse as Response);
@@ -259,7 +259,7 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.query = { type: 'FIRST_VISIT' };
       
-      (prisma.appointment.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.appointment.findMany as Mock).mockResolvedValue([]);
 
       // Act
       await getAppointments(mockRequest as AuthRequest, mockResponse as Response);
@@ -286,7 +286,7 @@ describe('Appointment Controller', () => {
         doctor: { user: { firstName: 'John', lastName: 'Doe' } },
       };
       
-      (prisma.appointment.findUnique as jest.Mock).mockResolvedValue(mockAppointment);
+      (prisma.appointment.findUnique as Mock).mockResolvedValue(mockAppointment);
 
       // Act
       await getAppointmentById(mockRequest as Request, mockResponse as Response);
@@ -300,7 +300,7 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.params = { id: 'nonexistent' };
       
-      (prisma.appointment.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.appointment.findUnique as Mock).mockResolvedValue(null);
 
       // Act
       await getAppointmentById(mockRequest as Request, mockResponse as Response);
@@ -325,8 +325,8 @@ describe('Appointment Controller', () => {
         status: AppointmentStatus.CONFIRMED,
       };
       
-      (prisma.appointment.findUnique as jest.Mock).mockResolvedValue(mockAppointment);
-      (prisma.appointment.update as jest.Mock).mockResolvedValue({
+      (prisma.appointment.findUnique as Mock).mockResolvedValue(mockAppointment);
+      (prisma.appointment.update as Mock).mockResolvedValue({
         ...mockAppointment,
         status: AppointmentStatus.CANCELLED,
       });
@@ -346,7 +346,7 @@ describe('Appointment Controller', () => {
       mockRequest.params = { id: 'nonexistent' };
       mockRequest.body = { status: AppointmentStatus.CANCELLED };
       
-      (prisma.appointment.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.appointment.findUnique as Mock).mockResolvedValue(null);
 
       // Act
       await updateAppointmentStatus(mockRequest as AuthRequest, mockResponse as Response);
@@ -385,9 +385,9 @@ describe('Appointment Controller', () => {
         endTime: new Date('2024-03-20T10:30:00Z'),
       };
       
-      (prisma.appointment.findUnique as jest.Mock).mockResolvedValue(mockAppointment);
-      (prisma.appointment.findFirst as jest.Mock).mockResolvedValue(null); // No conflict
-      (prisma.appointment.update as jest.Mock).mockResolvedValue({
+      (prisma.appointment.findUnique as Mock).mockResolvedValue(mockAppointment);
+      (prisma.appointment.findFirst as Mock).mockResolvedValue(null); // No conflict
+      (prisma.appointment.update as Mock).mockResolvedValue({
         ...mockAppointment,
         startTime: new Date('2024-03-21T10:00:00Z'),
         endTime: new Date('2024-03-21T10:30:00Z'),
@@ -428,8 +428,8 @@ describe('Appointment Controller', () => {
         doctorId: 'doctor-123',
       };
       
-      (prisma.appointment.findUnique as jest.Mock).mockResolvedValue(mockAppointment);
-      (prisma.appointment.findFirst as jest.Mock).mockResolvedValue({
+      (prisma.appointment.findUnique as Mock).mockResolvedValue(mockAppointment);
+      (prisma.appointment.findFirst as Mock).mockResolvedValue({
         id: 'conflicting-apt',
       });
 
