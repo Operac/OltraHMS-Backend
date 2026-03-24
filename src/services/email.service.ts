@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { escape } from 'lodash';
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -25,8 +26,9 @@ export const sendEmail = async (to: string, subject: string, html: string) => {
 
 export const sendWelcomeEmail = async (email: string, name: string) => {
   const subject = 'Welcome to OltraHMS';
+  const safeName = escape(name);
   const html = `
-    <h1>Welcome ${name}!</h1>
+    <h1>Welcome ${safeName}!</h1>
     <p>Your account has been successfully created.</p>
     <p>Please login to complete your profile.</p>
   `;
@@ -34,7 +36,7 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
 };
 
 export const sendPasswordResetEmail = async (email: string, token: string) => {
-  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${escape(token)}`;
   const subject = 'Password Reset Request';
   const html = `
     <h1>Reset Your Password</h1>
@@ -56,15 +58,22 @@ export const sendAppointmentConfirmationEmail = async (
   type: string
 ) => {
   const subject = 'Appointment Confirmation - OltraHMS';
+  // Sanitize all user inputs to prevent XSS
+  const safePatientName = escape(patientName);
+  const safeDoctorName = escape(doctorName);
+  const safeDate = escape(appointmentDate);
+  const safeTime = escape(appointmentTime);
+  const safeType = escape(type);
+  
   const html = `
     <h1>Appointment Confirmed</h1>
-    <p>Dear ${patientName},</p>
+    <p>Dear ${safePatientName},</p>
     <p>Your appointment has been confirmed. Here are the details:</p>
     <ul>
-      <li><strong>Doctor:</strong> ${doctorName}</li>
-      <li><strong>Date:</strong> ${appointmentDate}</li>
-      <li><strong>Time:</strong> ${appointmentTime}</li>
-      <li><strong>Type:</strong> ${type}</li>
+      <li><strong>Doctor:</strong> ${safeDoctorName}</li>
+      <li><strong>Date:</strong> ${safeDate}</li>
+      <li><strong>Time:</strong> ${safeTime}</li>
+      <li><strong>Type:</strong> ${safeType}</li>
     </ul>
     <p>Please arrive 15 minutes early.</p>
     <p>Best regards,<br>OltraHMS Team</p>

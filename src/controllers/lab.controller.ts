@@ -47,7 +47,7 @@ export const getPendingOrders = async (req: Request, res: Response) => {
         });
         res.json(pendingOrders);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching lab requests', error });
+        res.status(500).json({ message: 'Error fetching lab requests' });
     }
 };
 
@@ -63,7 +63,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
 
         res.json(updatedOrder);
     } catch (error) {
-        res.status(500).json({ message: 'Error updating lab status', error });
+        res.status(500).json({ message: 'Error updating lab status' });
     }
 };
 
@@ -168,7 +168,7 @@ export const uploadResult = async (req: Request, res: Response) => {
 
         res.json(result);
     } catch (error) {
-        res.status(500).json({ message: 'Error uploading results', error });
+        res.status(500).json({ message: 'Error uploading results' });
     }
 };
 

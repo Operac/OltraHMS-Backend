@@ -55,7 +55,7 @@ export const markAsRead = async (req: Request, res: Response) => {
         });
         res.json(notification);
     } catch (error) {
-        res.status(500).json({ message: 'Error updating notification', error });
+        res.status(500).json({ message: 'Error updating notification' });
     }
 };
 
@@ -74,6 +74,6 @@ export const markAllAsRead = async (req: Request, res: Response) => {
         });
         res.json({ message: 'All notifications marked as read' });
     } catch (error) {
-        res.status(500).json({ message: 'Error updating notifications', error });
+        res.status(500).json({ message: 'Error updating notifications' });
     }
 };

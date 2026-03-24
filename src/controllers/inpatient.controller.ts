@@ -48,7 +48,7 @@ export const getScheduledMedications = async (req: Request, res: Response) => {
             administrations
         });
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching MAR', error });
+        res.status(500).json({ message: 'Error fetching MAR' });
     }
 };
 
@@ -76,7 +76,7 @@ export const logMedicationAdministration = async (req: AuthRequest, res: Respons
 
         res.status(201).json(adminRecord);
     } catch (error) {
-        res.status(500).json({ message: 'Error logging medication', error });
+        res.status(500).json({ message: 'Error logging medication' });
     }
 };
 
@@ -102,7 +102,7 @@ export const logFluidBalance = async (req: AuthRequest, res: Response) => {
 
         res.status(201).json(fluidRecord);
     } catch (error) {
-        res.status(500).json({ message: 'Error logging fluid balance', error });
+        res.status(500).json({ message: 'Error logging fluid balance' });
     }
 };
 
@@ -127,7 +127,7 @@ export const getPatientCharts = async (req: Request, res: Response) => {
 
         res.json({ vitals, fluids });
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching patient charts', error });
+        res.status(500).json({ message: 'Error fetching patient charts' });
     }
 };
 
@@ -155,7 +155,7 @@ export const addWardRoundNote = async (req: AuthRequest, res: Response) => {
 
         res.status(201).json(round);
     } catch (error) {
-        res.status(500).json({ message: 'Error adding ward round note', error });
+        res.status(500).json({ message: 'Error adding ward round note' });
     }
 };
 
@@ -173,7 +173,7 @@ export const getWardRounds = async (req: Request, res: Response) => {
 
         res.json(rounds);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching ward rounds', error });
+        res.status(500).json({ message: 'Error fetching ward rounds' });
     }
 };
 

@@ -16,7 +16,7 @@ export const getServices = async (req: Request, res: Response) => {
         });
         res.json(services);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching services', error });
+        res.status(500).json({ message: 'Error fetching services' });
     }
 };
 
@@ -37,7 +37,7 @@ export const createService = async (req: Request, res: Response) => {
         });
         res.status(201).json(service);
     } catch (error) {
-        res.status(500).json({ message: 'Error creating service', error });
+        res.status(500).json({ message: 'Error creating service' });
     }
 };
 
@@ -57,7 +57,7 @@ export const updateService = async (req: Request, res: Response) => {
         });
         res.json(service);
     } catch (error) {
-        res.status(500).json({ message: 'Error updating service', error });
+        res.status(500).json({ message: 'Error updating service' });
     }
 };
 
@@ -68,6 +68,6 @@ export const deleteService = async (req: Request, res: Response) => {
         await prisma.service.delete({ where: { id: id as string } });
         res.json({ message: 'Service deleted' });
     } catch (error) {
-        res.status(500).json({ message: 'Error deleting service', error });
+        res.status(500).json({ message: 'Error deleting service' });
     }
 };

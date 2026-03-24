@@ -133,7 +133,7 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
         return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error(error); // Log real error
-    res.status(500).json({ message: 'Failed to create appointment', error });
+    res.status(500).json({ message: 'Failed to create appointment' });
   }
 };
 
@@ -193,7 +193,7 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
         res.json(appointments);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Failed to fetch appointments', error });
+        res.status(500).json({ message: 'Failed to fetch appointments' });
     }
 };
 
@@ -219,7 +219,7 @@ export const getAppointmentById = async (req: Request, res: Response) => {
         if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
         res.json(appointment);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch appointment', error });
+        res.status(500).json({ message: 'Failed to fetch appointment' });
     }
 };
 
@@ -257,7 +257,7 @@ export const updateAppointmentStatus = async (req: AuthRequest, res: Response) =
 
         res.json(updated);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to update appointment', error });
+        res.status(500).json({ message: 'Failed to update appointment' });
     }
 };
 

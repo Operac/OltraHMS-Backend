@@ -94,7 +94,7 @@ export const getPayrolls = async (req: AuthRequest, res: Response) => {
 
         res.json(payrolls);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch payrolls', error });
+        res.status(500).json({ message: 'Failed to fetch payrolls' });
     }
 };
 
@@ -115,7 +115,7 @@ export const getMyPayrolls = async (req: AuthRequest, res: Response) => {
 
         res.json(payrolls);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch your payrolls', error });
+        res.status(500).json({ message: 'Failed to fetch your payrolls' });
     }
 };
 
@@ -136,7 +136,7 @@ export const markAsPaid = async (req: AuthRequest, res: Response) => {
 
         res.json({ message: 'Payroll marked as paid' });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to update payroll status', error });
+        res.status(500).json({ message: 'Failed to update payroll status' });
     }
 };
 

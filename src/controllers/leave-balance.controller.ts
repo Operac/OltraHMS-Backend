@@ -28,7 +28,7 @@ export const getStaffBalances = async (req: AuthRequest, res: Response) => {
 
         res.json(balances);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch staff balances', error });
+        res.status(500).json({ message: 'Failed to fetch staff balances' });
     }
 };
 
@@ -58,6 +58,6 @@ export const updateStaffBalance = async (req: AuthRequest, res: Response) => {
 
         res.json(balance);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to update balance', error });
+        res.status(500).json({ message: 'Failed to update balance' });
     }
 };

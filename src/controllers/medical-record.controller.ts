@@ -151,7 +151,7 @@ export const getMedicalRecords = async (req: AuthRequest, res: Response) => {
     res.json(records);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Failed to fetch records', error });
+    res.status(500).json({ message: 'Failed to fetch records' });
   }
 };
 
@@ -177,7 +177,7 @@ export const getMedicalRecordById = async (req: AuthRequest, res: Response) => {
     res.json(record);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Failed to fetch record', error });
+    res.status(500).json({ message: 'Failed to fetch record' });
   }
 };
 

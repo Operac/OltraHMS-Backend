@@ -19,7 +19,7 @@ export const addExpense = async (req: Request, res: Response) => {
         });
         res.status(201).json(expense);
     } catch (error) {
-        res.status(500).json({ message: 'Error adding expense', error });
+        res.status(500).json({ message: 'Error adding expense' });
     }
 };
 
@@ -44,7 +44,7 @@ export const getExpenses = async (req: Request, res: Response) => {
         });
         res.json(expenses);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching expenses', error });
+        res.status(500).json({ message: 'Error fetching expenses' });
     }
 };
 
@@ -75,6 +75,6 @@ export const getProfitLoss = async (req: Request, res: Response) => {
             netProfit: (totalRevenue._sum.amountPaid || 0) - (totalExpenses._sum.amount || 0)
         });
     } catch (error) {
-        res.status(500).json({ message: 'Error calculating profit/loss', error });
+        res.status(500).json({ message: 'Error calculating profit/loss' });
     }
 };

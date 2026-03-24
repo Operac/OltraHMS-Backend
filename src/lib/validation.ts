@@ -17,14 +17,15 @@ export const loginSchema = z.object({
 });
 
 export const registerSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.string().email('Invalid email address').max(255),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be less than 128 characters')
     .regex(passwordRegex, 'Password must contain uppercase, lowercase, number and special character'),
-  firstName: z.string().min(1, 'First name is required').max(50),
-  lastName: z.string().min(1, 'Last name is required').max(50),
-  phone: z.string().regex(phoneRegex, 'Invalid phone number').optional(),
+  firstName: z.string().min(1, 'First name is required').max(50, 'First name must be less than 50 characters'),
+  lastName: z.string().min(1, 'Last name is required').max(50, 'Last name must be less than 50 characters'),
+  phone: z.string().regex(phoneRegex, 'Invalid phone number').max(20).optional(),
   role: z.enum(['ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'PATIENT', 'PHARMACIST', 'LAB_TECH', 'ACCOUNTANT']).optional(),
 });
 
@@ -32,22 +33,22 @@ export const registerSchema = z.object({
  * Patient schemas
  */
 export const patientSchema = z.object({
-  firstName: z.string().min(1, 'First name is required').max(50),
-  lastName: z.string().min(1, 'Last name is required').max(50),
-  phone: z.string().regex(phoneRegex, 'Invalid phone number'),
+  firstName: z.string().min(1, 'First name is required').max(50, 'First name too long'),
+  lastName: z.string().min(1, 'Last name is required').max(50, 'Last name too long'),
+  phone: z.string().regex(phoneRegex, 'Invalid phone number').max(20, 'Phone number too long'),
   dateOfBirth: z.string().datetime({ message: 'Invalid date format' }),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']),
-  address: z.string().max(200).optional(),
-  city: z.string().max(50).optional(),
-  state: z.string().max(50).optional(),
-  country: z.string().max(50).optional(),
+  address: z.string().max(500, 'Address too long').optional(),
+  city: z.string().max(100, 'City name too long').optional(),
+  state: z.string().max(100, 'State name too long').optional(),
+  country: z.string().max(100, 'Country name too long').optional(),
   bloodGroup: z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional(),
-  allergies: z.string().max(500).optional(),
-  chronicConditions: z.string().max(500).optional(),
-  emergencyContactName: z.string().max(100).optional(),
-  emergencyContactPhone: z.string().regex(phoneRegex).optional(),
-  insuranceProvider: z.string().max(100).optional(),
-  insurancePolicyNumber: z.string().max(50).optional(),
+  allergies: z.string().max(1000, 'Allergies text too long').optional(),
+  chronicConditions: z.string().max(1000, 'Conditions text too long').optional(),
+  emergencyContactName: z.string().max(100, 'Contact name too long').optional(),
+  emergencyContactPhone: z.string().regex(phoneRegex).max(20).optional(),
+  insuranceProvider: z.string().max(200, 'Provider name too long').optional(),
+  insurancePolicyNumber: z.string().max(100, 'Policy number too long').optional(),
   insuranceExpiry: z.string().datetime().optional(),
 });
 
@@ -62,7 +63,7 @@ export const appointmentSchema = z.object({
   startTime: z.string().datetime('Invalid start time'),
   endTime: z.string().datetime('Invalid end time'),
   type: z.enum(['FIRST_VISIT', 'FOLLOW_UP', 'CONSULTATION', 'EMERGENCY', 'CHECKUP']),
-  reason: z.string().max(500).optional(),
+  reason: z.string().max(2000, 'Reason too long').optional(),
 });
 
 export const appointmentUpdateSchema = appointmentSchema.partial();

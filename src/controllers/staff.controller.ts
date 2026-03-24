@@ -36,6 +36,6 @@ export const getDoctors = async (req: AuthRequest, res: Response) => {
 
     res.json(validDoctors);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch doctors', error });
+    res.status(500).json({ message: 'Failed to fetch doctors' });
   }
 };

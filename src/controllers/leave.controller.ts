@@ -80,7 +80,7 @@ export const requestLeave = async (req: AuthRequest, res: Response) => {
 
         res.status(201).json(leave);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to request leave', error });
+        res.status(500).json({ message: 'Failed to request leave' });
     }
 };
 
@@ -142,7 +142,7 @@ export const updateLeaveStatus = async (req: AuthRequest, res: Response) => {
         res.json({ message: `Leave request ${status}` });
 
     } catch (error) {
-        res.status(500).json({ message: 'Failed to update leave status', error });
+        res.status(500).json({ message: 'Failed to update leave status' });
     }
 };
 
@@ -167,7 +167,7 @@ export const getAllLeaves = async (req: AuthRequest, res: Response) => {
 
         res.json(leaves);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch leave requests', error });
+        res.status(500).json({ message: 'Failed to fetch leave requests' });
     }
 };
 
@@ -189,7 +189,7 @@ export const getMyLeaves = async (req: AuthRequest, res: Response) => {
 
         res.json(leaves);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch your leave requests', error });
+        res.status(500).json({ message: 'Failed to fetch your leave requests' });
     }
 };
 
@@ -233,6 +233,6 @@ export const getConflictingLeaves = async (req: AuthRequest, res: Response) => {
         res.json(conflicts);
 
     } catch (error) {
-        res.status(500).json({ message: 'Failed to check conflicts', error });
+        res.status(500).json({ message: 'Failed to check conflicts' });
     }
 };

@@ -12,7 +12,7 @@ export const getLeaveTypes = async (_req: AuthRequest, res: Response) => {
         });
         res.json(types);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to fetch leave types', error });
+        res.status(500).json({ message: 'Failed to fetch leave types' });
     }
 };
 
@@ -34,7 +34,7 @@ export const createLeaveType = async (req: AuthRequest, res: Response) => {
 
         res.status(201).json(leaveType);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to create leave type', error });
+        res.status(500).json({ message: 'Failed to create leave type' });
     }
 };
 
@@ -57,7 +57,7 @@ export const updateLeaveType = async (req: AuthRequest, res: Response) => {
 
         res.json(leaveType);
     } catch (error) {
-        res.status(500).json({ message: 'Failed to update leave type', error });
+        res.status(500).json({ message: 'Failed to update leave type' });
     }
 };
 
@@ -78,6 +78,6 @@ export const deleteLeaveType = async (req: AuthRequest, res: Response) => {
         await prisma.leaveType.delete({ where: { id } });
         res.json({ message: 'Leave type deleted successfully' });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to delete leave type', error });
+        res.status(500).json({ message: 'Failed to delete leave type' });
     }
 };

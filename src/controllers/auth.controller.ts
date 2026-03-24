@@ -113,7 +113,7 @@ export const register = async (req: Request, res: Response) => {
 
     res.status(201).json({ message: 'User created successfully', userId: user.id });
   } catch (error) {
-    res.status(500).json({ message: 'Registration failed', error });
+    res.status(500).json({ message: 'Registration failed' });
   }
 };
 
@@ -535,6 +535,6 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
         if (error instanceof z.ZodError) {
              return res.status(400).json({ message: 'Validation error', errors: error.issues });
         }
-        res.status(500).json({ message: 'Failed to update profile', error });
+        res.status(500).json({ message: 'Failed to update profile' });
     }
 };

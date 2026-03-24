@@ -90,7 +90,7 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
 
   } catch (error) {
     console.error('Create Patient Error:', error);
-    res.status(500).json({ message: 'Failed to create patient', error });
+    res.status(500).json({ message: 'Failed to create patient' });
   }
 };
 
@@ -121,6 +121,7 @@ export const getPatients = async (req: Request, res: Response) => {
       ];
     }
 
+    // Use single optimized query with count
     const [patients, total] = await Promise.all([
       prisma.patient.findMany({
         where: whereClause,
@@ -129,40 +130,23 @@ export const getPatients = async (req: Request, res: Response) => {
         orderBy: { createdAt: 'desc' },
         include: { 
           user: { select: { email: true, status: true } },
-          appointments: {
-            orderBy: { appointmentDate: 'desc' },
-            take: 1,
-            select: { appointmentDate: true }
-          },
-          admissions: {
-            orderBy: { admissionDate: 'desc' },
-            take: 1,
-            select: { admissionDate: true, dischargeDate: true }
-          }
+          _count: { select: { appointments: true, admissions: true } }
         }
       }),
       prisma.patient.count({ where: whereClause }),
     ]);
 
-    // Transform data to include lastVisit
+    // Transform data - lastVisit will be fetched separately if needed
+    // For performance, we return basic patient data without the N+1 queries
+    // Clients can call /patients/:id for detailed visit history if needed
     const transformedPatients = patients.map(patient => {
-      // Find the most recent date from appointments or admissions
-      const lastAppointment = patient.appointments[0]?.appointmentDate;
-      const lastAdmission = patient.admissions[0]?.admissionDate;
-      
-      let lastVisit = null;
-      if (lastAppointment && lastAdmission) {
-        lastVisit = new Date(lastAppointment) > new Date(lastAdmission) ? lastAppointment : lastAdmission;
-      } else if (lastAppointment) {
-        lastVisit = lastAppointment;
-      } else if (lastAdmission) {
-        lastVisit = lastAdmission;
-      }
-
-      const { appointments, admissions, ...rest } = patient as any;
+      const { _count, ...rest } = patient as any;
       return {
         ...rest,
-        lastVisit: lastVisit ? lastVisit.toISOString() : null
+        // Return counts instead of full records to avoid over-fetching
+        appointmentCount: _count?.appointments || 0,
+        admissionCount: _count?.admissions || 0,
+        lastVisit: null // Can be fetched on-demand from detail endpoint
       };
     });
 
@@ -429,6 +413,6 @@ export const getMedicationSchedule = async (req: AuthRequest, res: Response) => 
 
     } catch (error) {
         console.error("Medication Schedule Error:", error);
-        res.status(500).json({ message: 'Failed to fetch medication schedule', error });
+        res.status(500).json({ message: 'Failed to fetch medication schedule' });
     }
 };
