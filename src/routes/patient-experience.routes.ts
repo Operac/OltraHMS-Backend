@@ -3,6 +3,7 @@ import {
     getInsurancePolicies, 
     addInsurancePolicy, 
     verifyInsurance,
+    getAllPatientInsurance,
     getMedicationAdherence, 
     logMedicationTaken, 
     rescheduleAppointment, 
@@ -52,6 +53,9 @@ router.post('/feedback', submitFeedback);
 router.get('/insurance', getInsurancePolicies);
 router.post('/insurance', addInsurancePolicy);
 router.patch('/insurance/:insuranceId/verify', verifyInsurance);
+
+// Admin/Reception/Accountant routes for all patient insurance
+router.get('/insurance/all', authenticate, authorize(['ADMIN', 'RECEPTIONIST', 'ACCOUNTANT', 'INSURANCE_OFFICER']) as any, getAllPatientInsurance);
 
 // Medications
 router.get('/medications/adherence', getMedicationAdherence);

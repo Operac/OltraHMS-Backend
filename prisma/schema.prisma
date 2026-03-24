@@ -246,6 +246,7 @@ model User {
 
 enum InsuranceStatus {
   PENDING
+  ACTIVE
   VERIFIED
   REJECTED
   EXPIRED
@@ -331,6 +332,8 @@ model PatientInsurance {
   provider        String   // HMO name e.g., "Hygeia", "AIICO", "National Health"
   planName        String?  // Plan type e.g., "Gold", "Silver", "Family", "Individual"
   policyNumber    String
+  groupNumber     String?  // Group number for HMO coverage
+  coveragePercentage Float @default(100) // Percentage covered by insurance (0-100)
   coverageDetails Json?    // { annualLimit, monthlyLimit, copay, servicesCovered[] }
   isPrimary       Boolean  @default(true)
   

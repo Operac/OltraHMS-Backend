@@ -110,9 +110,7 @@ export const createMedicalRecord = async (req: AuthRequest, res: Response) => {
     res.status(201).json(record);
   } catch (error: any) {
     console.error(error);
-    const fs = require('fs');
-    fs.writeFileSync('error.log', JSON.stringify(error, null, 2) + '\n' + error.stack);
-    res.status(500).json({ message: 'Failed to create medical record', error: error.message });
+    res.status(500).json({ message: 'Failed to create medical record' });
   }
 };
 

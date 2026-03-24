@@ -232,7 +232,7 @@ export const getInsurancePolicies = async (req: AuthRequest, res: Response) => {
 export const addInsurancePolicy = async (req: AuthRequest, res: Response) => {
     try {
         const patient = await getPatientContext(req.user!.id);
-        const { provider, policyNumber, planName, isPrimary, validFrom, validUntil, coverageDetails } = req.body;
+        const { provider, policyNumber, planName, isPrimary, validFrom, validUntil, coverageDetails, groupNumber, coveragePercentage } = req.body;
         
         const policy = await prisma.patientInsurance.create({
             data: {
@@ -244,12 +244,41 @@ export const addInsurancePolicy = async (req: AuthRequest, res: Response) => {
                 status: 'PENDING',
                 validFrom: validFrom ? new Date(validFrom) : null,
                 validUntil: validUntil ? new Date(validUntil) : null,
-                coverageDetails
+                coverageDetails,
+                groupNumber: groupNumber || null,
+                coveragePercentage: coveragePercentage || 100
             }
         });
         res.status(201).json(policy);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to add insurance' });
+    }
+};
+
+// Get all patient insurance (for admin/receptionist/accountant)
+export const getAllPatientInsurance = async (req: AuthRequest, res: Response) => {
+    try {
+        const { patientId, status } = req.query;
+        
+        const where: any = {};
+        if (patientId) where.patientId = patientId as string;
+        if (status) where.status = status;
+        
+        const policies = await prisma.patientInsurance.findMany({
+            where,
+            include: {
+                patient: {
+                    include: {
+                        user: { select: { firstName: true, lastName: true, email: true } }
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        
+        res.json(policies);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to fetch insurance policies' });
     }
 };
 

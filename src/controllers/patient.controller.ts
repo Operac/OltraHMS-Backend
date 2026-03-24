@@ -178,6 +178,7 @@ export const getPatientById = async (req: AuthRequest, res: Response) => {
             include: {
                 user: { select: { email: true, status: true } },
                 appointments: { take: 5, orderBy: { appointmentDate: 'desc' } },
+                insurancePolicies: { orderBy: { createdAt: 'desc' } },
                 ...(includeClinicalData && { medicalRecords: { take: 5, orderBy: { visitDate: 'desc' } } }),
             }
         });

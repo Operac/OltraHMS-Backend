@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { z } from 'zod';
-import { InvoiceStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { InvoiceStatus, PaymentMethod, PaymentStatus, InsuranceStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 
 // Helper function to generate unique invoice numbers
@@ -42,7 +42,18 @@ export const getInvoiceById = async (req: Request, res: Response) => {
         const { id } = req.params as { id: string };
         const invoice = await prisma.invoice.findUnique({
             where: { id },
-            include: { payments: true }
+            include: { 
+                payments: true,
+                patient: {
+                    include: {
+                        insurancePolicies: {
+                            where: { status: { in: [InsuranceStatus.ACTIVE, InsuranceStatus.VERIFIED] }},
+                            orderBy: { createdAt: 'desc' },
+                            take: 1
+                        }
+                    }
+                }
+            }
         });
         if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
         res.json(invoice);
