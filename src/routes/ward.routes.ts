@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getWards, createWard, createBed, deleteWard, deleteBed } from '../controllers/ward.controller';
+import { getWards, createWard, createBed, deleteWard, deleteBed, updateBedStatus } from '../controllers/ward.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -13,5 +13,6 @@ router.delete('/:id', deleteWard);
 
 router.post('/beds', createBed);
 router.delete('/beds/:id', deleteBed);
+router.patch('/beds/:id/status', updateBedStatus);
 
 export default router;

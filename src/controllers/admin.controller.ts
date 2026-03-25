@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import bcrypt from 'bcryptjs';
 import { Role } from '@prisma/client';
+import { sendCredentialsEmail } from '../services/email.service';
 
 /**
  * Get System Statistics for Dashboard
@@ -90,7 +91,9 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
         const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) return res.status(400).json({ message: 'Email already exists' });
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Use default password if not provided
+        const defaultPassword = password || 'Oltra123!';
+        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
         // Transaction
         const result = await prisma.$transaction(async (tx) => {
@@ -134,7 +137,22 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
             return user;
         });
 
-        res.status(201).json(result);
+        // 4. Send credentials email
+        try {
+            await sendCredentialsEmail(email, `${firstName} ${lastName}`, role);
+        } catch (emailError) {
+            console.error('Failed to send credentials email:', emailError);
+            // Continue even if email fails - credentials shown on screen
+        }
+
+        // Return credentials in response (for on-screen display)
+        res.status(201).json({ 
+            ...result,
+            credentials: {
+                email,
+                password: defaultPassword
+            }
+        });
     } catch (error) {
         console.error("Create Staff Error:", error);
 

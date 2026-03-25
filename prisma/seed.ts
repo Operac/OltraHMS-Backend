@@ -38,11 +38,13 @@ async function main() {
   await prisma.referral.deleteMany();
   await prisma.medicalRecord.deleteMany();
   await prisma.appointment.deleteMany();
+  await prisma.surgeryCase.deleteMany();
   await prisma.patientInsurance.deleteMany();
   await prisma.triage.deleteMany();
   await prisma.vitalSigns.deleteMany();
   await prisma.symptomLog.deleteMany();
   await prisma.wellnessGoal.deleteMany();
+  await prisma.refillRequest.deleteMany();
   await prisma.patient.deleteMany();
   await prisma.leaveRequest.deleteMany();
   await prisma.staffLeaveBalance.deleteMany();
@@ -54,6 +56,7 @@ async function main() {
   await prisma.operatingTheater.deleteMany();
   await prisma.radiologyTest.deleteMany();
   await prisma.service.deleteMany();
+  await prisma.message.deleteMany();
   await prisma.user.deleteMany();
 
   // ─── HELPERS ───────────────────────────────────────────────────────────────

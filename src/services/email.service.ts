@@ -35,6 +35,47 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
   await sendEmail(email, subject, html);
 };
 
+/**
+ * Send login credentials email (for new patients/staff)
+ */
+export const sendCredentialsEmail = async (
+  email: string,
+  name: string,
+  role: string,
+  patientNumber?: string
+) => {
+  const subject = 'Your Login Credentials - OltraHMS';
+  const safeName = escape(name);
+  const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+  
+  let roleDisplay = role;
+  if (role === 'PATIENT') roleDisplay = 'Patient';
+  else if (role === 'DOCTOR') roleDisplay = 'Doctor';
+  else if (role === 'NURSE') roleDisplay = 'Nurse';
+  else if (role === 'RECEPTIONIST') roleDisplay = 'Receptionist';
+  else if (role === 'PHARMACIST') roleDisplay = 'Pharmacist';
+  else if (role === 'LAB_TECH') roleDisplay = 'Lab Technician';
+  else if (role === 'ACCOUNTANT') roleDisplay = 'Accountant';
+  else if (role === 'ADMIN') roleDisplay = 'Administrator';
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #0ea5e9;">Welcome to OltraHMS!</h1>
+      <p>Dear ${safeName},</p>
+      <p>Your ${roleDisplay} account has been created. Here are your login credentials:</p>
+      <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <p style="margin: 8px 0;"><strong>Email:</strong> ${escape(email)}</p>
+        <p style="margin: 8px 0;"><strong>Password:</strong> Oltra123!</p>
+        ${patientNumber ? `<p style="margin: 8px 0;"><strong>Patient Number:</strong> ${escape(patientNumber)}</p>` : ''}
+      </div>
+      <p>Please login at: <a href="${loginUrl}" style="color: #0ea5e9;">${loginUrl}</a></p>
+      <p><strong>Important:</strong> Please change your password after your first login for security.</p>
+      <p style="margin-top: 30px;">Best regards,<br>OltraHMS Team</p>
+    </div>
+  `;
+  await sendEmail(email, subject, html);
+};
+
 export const sendPasswordResetEmail = async (email: string, token: string) => {
   const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${escape(token)}`;
   const subject = 'Password Reset Request';

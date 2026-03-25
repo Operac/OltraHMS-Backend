@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 
+const PDFDocument = require('pdfkit');
+
 /**
  * Generate Payroll for All Active Staff for a specific Month/Year
  * Formula: Net = Base + Bonus - Deductions - Tax
@@ -174,5 +176,114 @@ export const updatePayroll = async (req: AuthRequest, res: Response) => {
     } catch (error) {
         console.error("Update Payroll Error:", error);
         res.status(500).json({ message: 'Failed to update payroll' });
+    }
+};
+
+/**
+ * Download Payslip as PDF
+ */
+export const downloadPayslipPDF = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params as { id: string };
+        const userId = req.user?.id;
+
+        // Get the payroll record
+        const payroll = await prisma.payroll.findUnique({
+            where: { id },
+            include: {
+                staff: {
+                    include: { user: true }
+                }
+            }
+        });
+
+        if (!payroll) {
+            return res.status(404).json({ message: 'Payroll not found' });
+        }
+
+        // Verify ownership (staff can only download their own)
+        if (payroll.staff.userId !== userId) {
+            // Allow admin to download any
+            const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+            if (currentUser?.role !== 'ADMIN') {
+                return res.status(403).json({ message: 'Unauthorized' });
+            }
+        }
+
+        const doc = new PDFDocument();
+        
+        // Set response headers for PDF download
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=payslip-${payroll.month}-${payroll.year}.pdf`);
+        
+        doc.pipe(res);
+
+        // Header with Logo placeholder
+        doc.fontSize(20).font('Helvetica-Bold').text('OltraHMS', { align: 'center' });
+        doc.fontSize(14).font('Helvetica').text('PAYSLIP', { align: 'center' });
+        doc.moveDown();
+
+        // Period
+        doc.fontSize(12).text(`Period: ${payroll.month} ${payroll.year}`, { align: 'center' });
+        doc.moveDown(2);
+
+        // Employee Details
+        doc.fontSize(11).font('Helvetica-Bold');
+        doc.text('Employee Details');
+        doc.font('Helvetica').fontSize(10);
+        doc.text(`Name: ${payroll.staff.user.firstName} ${payroll.staff.user.lastName}`);
+        doc.text(`Employee ID: ${payroll.staff.id}`);
+        doc.moveDown();
+
+        // Earnings & Deductions Table
+        const startY = doc.y;
+        
+        doc.font('Helvetica-Bold').fontSize(11);
+        doc.text('Earnings', 50, startY);
+        doc.text('Amount', 200, startY, { width: 100, align: 'right' });
+        doc.text('Deductions', 350, startY);
+        doc.text('Amount', 500, startY, { width: 80, align: 'right' });
+        
+        doc.moveTo(50, doc.y + 5).lineTo(550, doc.y + 5).stroke();
+        doc.moveDown();
+
+        doc.font('Helvetica').fontSize(10);
+        doc.text('Base Salary', 50);
+        doc.text(payroll.baseSalary.toLocaleString(), 200, { width: 100, align: 'right' });
+        doc.text('Tax', 350);
+        doc.text(payroll.tax.toLocaleString(), 500, { width: 80, align: 'right' });
+        
+        doc.text('Bonuses', 50);
+        doc.text(payroll.bonuses.toLocaleString(), 200, { width: 100, align: 'right' });
+        doc.text('Other Deductions', 350);
+        doc.text(payroll.deductions.toLocaleString(), 500, { width: 80, align: 'right' });
+
+        doc.moveDown(2);
+
+        // Totals
+        doc.font('Helvetica-Bold').fontSize(11);
+        const totalY = doc.y;
+        doc.text('Total Earnings:', 50, totalY);
+        doc.text((payroll.baseSalary + payroll.bonuses).toLocaleString(), 200, { width: 100, align: 'right' });
+        doc.text('Total Deductions:', 350, totalY);
+        doc.text((payroll.tax + payroll.deductions).toLocaleString(), 500, { width: 80, align: 'right' });
+
+        doc.moveDown(2);
+
+        // Net Salary (highlighted)
+        doc.fontSize(14).font('Helvetica-Bold');
+        doc.text(`NET SALARY: ${payroll.netSalary.toLocaleString()}`, { align: 'center' });
+
+        doc.moveDown(2);
+
+        // Footer
+        doc.fontSize(8).font('Helvetica').text('This is a computer-generated document.', { align: 'center' });
+        doc.text(`Generated on: ${new Date().toLocaleDateString()}`, { align: 'center' });
+
+        doc.end();
+
+    } catch (error) {
+        console.error("Download Payslip Error:", error);
+        res.status(500).json({ message: 'Failed to download payslip' });
     }
 };

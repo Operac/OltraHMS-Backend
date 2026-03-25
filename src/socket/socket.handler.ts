@@ -96,11 +96,13 @@ export const setupSocketHandlers = (io: any) => {
                 console.error('Error saving message:', err);
             }
 
-            // Use socket.to() to exclude sender - prevents duplicate messages
-            socket.to(data.roomId).emit('receive-message', {
+            // Include roomId in the emitted message so frontend can filter correctly
+            // Use io.to() to include sender, so sender sees their own message
+            io.to(data.roomId).emit('receive-message', {
                 message: data.message,
                 senderName: data.senderName,
                 senderId: data.senderId,
+                roomId: data.roomId,
                 timestamp: new Date().toISOString()
             });
         });

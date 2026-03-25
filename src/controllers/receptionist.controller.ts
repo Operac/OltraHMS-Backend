@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { PrismaClient, Role, AppointmentStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
+import { sendCredentialsEmail } from '../services/email.service';
 
 // --- Appointments ---
 
@@ -173,7 +174,8 @@ export const registerPatient = async (req: Request, res: Response) => {
         const existingUser = await prisma.user.findUnique({ where: { email: userEmail } });
         if (existingUser) return res.status(400).json({ message: 'Email already registered' });
 
-        const hashedPassword = await bcrypt.hash('Oltra123!', 10);
+        const defaultPassword = 'Oltra123!';
+        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
         const user = await prisma.user.create({
             data: {
                 email: userEmail,
@@ -202,7 +204,26 @@ export const registerPatient = async (req: Request, res: Response) => {
             }
         });
 
-        res.status(201).json({ message: 'Patient registered successfully', patient });
+        // 3. Send credentials email if email provided
+        if (email) {
+            try {
+                await sendCredentialsEmail(email, `${firstName} ${lastName}`, 'PATIENT', patientNumber);
+            } catch (emailError) {
+                console.error('Failed to send credentials email:', emailError);
+                // Continue even if email fails - credentials shown on screen
+            }
+        }
+
+        // Return credentials in response (for on-screen display)
+        res.status(201).json({ 
+            message: 'Patient registered successfully', 
+            patient,
+            credentials: {
+                email: userEmail,
+                password: defaultPassword,
+                patientNumber
+            }
+        });
     } catch (error: any) {
         console.error("Register Patient Error:", error);
         res.status(500).json({ message: error.message || 'Failed to register patient' });

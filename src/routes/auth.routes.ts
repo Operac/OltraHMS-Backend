@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, resetPasswordRequest, resetPasswordConfirm, updateProfile, setupTwoFactor, enableTwoFactor, disableTwoFactor, verifyTwoFactor } from '../controllers/auth.controller';
+import { register, login, resetPasswordRequest, resetPasswordConfirm, updateProfile, setupTwoFactor, enableTwoFactor, disableTwoFactor, verifyTwoFactor, changePassword } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { authLimiter, loginLimiter } from '../middleware/rateLimiter.middleware';
 
@@ -15,5 +15,6 @@ router.post('/2fa/enable', authenticate as any, enableTwoFactor as any);
 router.post('/2fa/disable', authenticate as any, disableTwoFactor as any);
 router.post('/2fa/verify', authLimiter, verifyTwoFactor as any);
 router.patch('/profile', authenticate as any, updateProfile as any);
+router.post('/change-password', authenticate as any, changePassword as any);
 
 export default router;

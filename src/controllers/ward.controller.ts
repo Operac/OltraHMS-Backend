@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { z } from 'zod';
+import { BedStatus } from '@prisma/client';
 
 const createWardSchema = z.object({
   name: z.string(),
@@ -95,5 +96,25 @@ export const deleteBed = async (req: AuthRequest, res: Response) => {
         res.json({ message: 'Bed deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Failed to delete bed' });
+    }
+};
+
+export const updateBedStatus = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params as { id: string };
+        const { status } = req.body as { status: string };
+        
+        const validStatuses: BedStatus[] = ['VACANT_CLEAN', 'VACANT_DIRTY', 'OCCUPIED', 'MAINTENANCE'];
+        if (!validStatuses.includes(status as BedStatus)) {
+            return res.status(400).json({ message: 'Invalid status' });
+        }
+        
+        const bed = await prisma.bed.update({
+            where: { id },
+            data: { status: status as BedStatus }
+        });
+        res.json(bed);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to update bed status' });
     }
 };

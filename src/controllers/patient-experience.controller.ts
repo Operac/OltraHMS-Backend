@@ -22,7 +22,11 @@ export const getMedicalRecords = async (req: AuthRequest, res: Response) => {
             include: {
                 doctor: { include: { user: { select: { firstName: true, lastName: true } } } },
                 prescriptions: true,
-                labOrders: true
+                labOrders: {
+                    include: {
+                        result: true
+                    }
+                }
             },
             orderBy: { visitDate: 'desc' }
         });
