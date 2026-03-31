@@ -188,7 +188,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/wellness', wellnessRoutes);
 app.use('/api/admissions', admissionRoutes);
 app.use('/api/wards', wardRoutes);
-app.use('/api/patient', patientExperienceRoutes);
+app.use('/api/patient-experience', patientExperienceRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/display', displayRoutes);
 app.use('/api/triage', triageRoutes);
