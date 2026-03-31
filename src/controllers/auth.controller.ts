@@ -111,7 +111,40 @@ export const register = async (req: Request, res: Response) => {
     await sendWelcomeEmail(user.email, user.firstName || 'User');
     await logAudit(user.id, 'USER_REGISTER', 'User registered successfully', req.ip || 'unknown');
 
-    res.status(201).json({ message: 'User created successfully', userId: user.id });
+    // Generate JWT and refresh tokens (similar to login function)
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error("JWT_SECRET is not defined");
+
+    const refreshSecret = process.env.REFRESH_SECRET;
+    if (!refreshSecret) throw new Error("REFRESH_SECRET is not defined");
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      jwtSecret,
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+        { id: user.id },
+        refreshSecret,
+        { expiresIn: '7d' }
+    );
+
+    // Fetch Staff ID if applicable (though for registration it will always be PATIENT, keeping for consistency)
+    const staff = await prisma.staff.findUnique({ where: { userId: user.id } });
+
+    res.status(201).json({ 
+      token, 
+      refreshToken, 
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role, 
+        firstName: user.firstName,
+        lastName: user.lastName,
+        staffId: staff?.id 
+      } 
+    });
   } catch (error) {
     res.status(500).json({ message: 'Registration failed' });
   }
