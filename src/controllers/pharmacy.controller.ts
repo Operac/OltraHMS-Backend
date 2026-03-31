@@ -174,18 +174,17 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
         const staffId = userWithStaff.staff.id;
 
         // Start Transaction to ensure atomicity
-        // Check for existing unpaid invoice for this medical record/prescription
-        const existingInvoice = await prisma.invoice.findFirst({
-            where: {
-                patientId: prescription.patientId,
-                status: { in: ['ISSUED', 'PARTIAL'] },
-                OR: [
-                    { medicalRecordId: prescription.medicalRecordId },
-                ].filter(Boolean)
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 1
-        });
+// Check for existing invoice for this medical record/prescription (any status)
+const existingInvoice = await prisma.invoice.findFirst({
+    where: {
+        patientId: prescription.patientId,
+        OR: [
+            { medicalRecordId: prescription.medicalRecordId },
+        ].filter(Boolean)
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 1
+});
 
         // Check if medication is available in inventory before proceeding
         const medicationExists = await prisma.medication.findFirst({
@@ -328,40 +327,40 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
             });
 
             // 5. Generate Invoice or Update Existing
-            let invoice;
-            if (existingInvoice) {
-                // Append items to existing unpaid invoice
-                const currentItems = existingInvoice.items as any[];
-                currentItems.push(...invoiceItems);
-                
-                const newTotal = existingInvoice.total + totalCost;
-                const newBalance = existingInvoice.balance + totalCost;
+             let invoice;
+             if (existingInvoice) {
+                 // Append items to existing invoice (any status)
+                 const currentItems = existingInvoice.items as any[];
+                 currentItems.push(...invoiceItems);
+                 
+                 const newTotal = existingInvoice.total + totalCost;
+                 const newBalance = existingInvoice.balance + totalCost;
 
-                invoice = await tx.invoice.update({
-                    where: { id: existingInvoice.id },
-                    data: {
-                        items: currentItems,
-                        subtotal: newTotal,
-                        total: newTotal,
-                        balance: newBalance
-                    }
-                });
-            } else {
-                // Create new invoice only if no existing unpaid invoice
-                invoice = await tx.invoice.create({
-                    data: {
-                        invoiceNumber: generateInvoiceNumber('INV'),
-                        patientId: prescription.patientId,
-                        medicalRecordId: prescription.medicalRecordId,
-                        items: invoiceItems,
-                        subtotal: totalCost,
-                        tax: 0,
-                        total: totalCost,
-                        balance: totalCost,
-                        status: 'ISSUED'
-                    }
-                });
-            }
+                 invoice = await tx.invoice.update({
+                     where: { id: existingInvoice.id },
+                     data: {
+                         items: currentItems,
+                         subtotal: newTotal,
+                         total: newTotal,
+                         balance: newBalance
+                     }
+                 });
+             } else {
+                 // Create new invoice only if no existing invoice
+                 invoice = await tx.invoice.create({
+                     data: {
+                         invoiceNumber: generateInvoiceNumber('INV'),
+                         patientId: prescription.patientId,
+                         medicalRecordId: prescription.medicalRecordId,
+                         items: invoiceItems,
+                         subtotal: totalCost,
+                         tax: 0,
+                         total: totalCost,
+                         balance: totalCost,
+                         status: 'ISSUED'
+                     }
+                 });
+             }
 
             return { invoice, prescriptionId };
         });
