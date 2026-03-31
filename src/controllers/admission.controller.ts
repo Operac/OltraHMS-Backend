@@ -47,6 +47,18 @@ export const admitPatient = async (req: AuthRequest, res: Response) => {
     try {
         const { patientId, wardId, bedId, reason } = admitSchema.parse(req.body);
 
+        // PRE-PAYMENT GATE: Verify payment cleared before admission (except for deposit)
+        const unpaidInvoices = await prisma.invoice.findMany({
+            where: { patientId, balance: { gt: 0 }, type: { not: 'DEPOSIT' } },
+            take: 1
+        });
+        if (unpaidInvoices.length > 0) {
+            return res.status(402).json({
+                message: `Payment required before admission. Outstanding balance: ₦${unpaidInvoices[0].balance.toLocaleString()}`,
+                requiredPayment: unpaidInvoices[0].balance
+            });
+        }
+
         // Find a vacant bed
         let bed;
         if (bedId) {
@@ -118,11 +130,11 @@ export const dischargePatient = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ message: 'Active admission not found' });
         }
 
-        // Check for unpaid invoices before discharge
+        // Check for unpaid invoices before discharge (by balance, not status)
         const unpaidInvoices = await prisma.invoice.findMany({
             where: {
                 patientId: admission.patientId,
-                status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.DRAFT, InvoiceStatus.PARTIAL] }
+                balance: { gt: 0 }  // Only invoices with actual unpaid balance
             }
         });
 

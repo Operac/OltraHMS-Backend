@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { startOfDay } from 'date-fns';
 
 /**
  * Request Leave (Staff)
@@ -16,8 +17,7 @@ export const requestLeave = async (req: AuthRequest, res: Response) => {
         // 1. Time-Travel Validation
         const start = new Date(startDate);
         const end = new Date(endDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const today = startOfDay(new Date());
 
         if (start < today) {
             return res.status(400).json({ message: 'Leave start date cannot be in the past.' });
@@ -26,9 +26,9 @@ export const requestLeave = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'End date must be after start date.' });
         }
 
-        // Calculate days
+        // Calculate days (inclusive of both start and end dates)
         const timeDiff = end.getTime() - start.getTime();
-        const days = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
+        const days = Math.floor(timeDiff / (1000 * 3600 * 24)) + 1;
 
         // 2. Overlap Validation
         const overlapping = await prisma.leaveRequest.findFirst({
@@ -56,12 +56,25 @@ export const requestLeave = async (req: AuthRequest, res: Response) => {
 
         const allocatedDays = balance ? balance.allocatedDays : leaveType.defaultDays;
         const usedDays = balance ? balance.usedDays : 0;
-        const remaining = allocatedDays - usedDays;
+        
+        // Count PENDING requests to prevent overbooking
+        const pendingDays = await prisma.leaveRequest.aggregate({
+            where: {
+                staffId: staff.id,
+                leaveTypeId,
+                status: 'PENDING'
+            },
+            _sum: { days: true }
+        });
+        
+        const pendingTotal = pendingDays._sum.days || 0;
+        const remaining = allocatedDays - usedDays - pendingTotal;
 
         if (days > remaining) {
             return res.status(400).json({ 
-                message: `Insufficient leave balance. You have ${remaining} days remaining for this type.`,
-                requested: days 
+                message: `Insufficient leave balance. You have ${remaining} days available (${allocatedDays} total, ${usedDays} used, ${pendingTotal} pending).`,
+                requested: days,
+                available: remaining
             });
         }
 
@@ -94,10 +107,12 @@ export const updateLeaveStatus = async (req: AuthRequest, res: Response) => {
         const approverId = req.user?.id;
         const role = req.user?.role;
 
-        const approverStaff = await prisma.staff.findUnique({ where: { userId: approverId } });
-        
-        if (!approverStaff && role !== 'ADMIN') {
-            return res.status(403).json({ message: 'Approver must be staff/admin' });
+        // Verify approver is ADMIN or a staff member
+        if (role !== 'ADMIN') {
+            const approverStaff = await prisma.staff.findUnique({ where: { userId: approverId } });
+            if (!approverStaff) {
+                return res.status(403).json({ message: 'Only admin or HR staff can approve leaves' });
+            }
         }
 
         const leave = await prisma.leaveRequest.findUnique({ 
@@ -116,7 +131,7 @@ export const updateLeaveStatus = async (req: AuthRequest, res: Response) => {
                 where: { id },
                 data: {
                     status,
-                    ...(approverStaff && { approvedById: approverStaff.id })
+                    approvedById: approverId
                 }
             });
 

@@ -4,6 +4,14 @@ import { PrismaClient, Role, AppointmentStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { sendCredentialsEmail } from '../services/email.service';
+import { randomBytes } from 'crypto';
+
+// Helper function to generate unique invoice numbers
+const generateInvoiceNumber = (prefix: string): string => {
+    const timestamp = Date.now();
+    const random = randomBytes(4).toString('hex');
+    return `${prefix}-${timestamp}-${random}`;
+};
 
 // --- Appointments ---
 
@@ -62,7 +70,51 @@ export const getDailyAppointments = async (req: Request, res: Response) => {
 export const checkInPatient = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        
+
+        const appointment = await prisma.appointment.findUnique({
+            where: { id: id as string },
+            include: { invoice: true }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({ message: 'Appointment not found' });
+        }
+
+        // Generate invoice from Service Pricing on check-in (consultation/telemedicine)
+        if (!appointment.invoice) {
+            const serviceName = appointment.type === 'TELEMEDICINE' ? 'Telemedicine Consultation' : 'Consultation';
+            const service = await prisma.service.findUnique({ where: { name: serviceName } });
+            if (!service || !service.price || service.price <= 0) {
+                return res.status(400).json({
+                    message: `Pricing not configured. Please create/update Service "${serviceName}" with a positive price.`
+                });
+            }
+
+            const price = service.price;
+            await prisma.invoice.create({
+                data: {
+                    invoiceNumber: generateInvoiceNumber('INV-APPT'),
+                    patientId: appointment.patientId,
+                    appointmentId: appointment.id,
+                    status: 'ISSUED',
+                    items: [
+                        {
+                            itemType: 'APPOINTMENT',
+                            itemId: appointment.id,
+                            name: serviceName,
+                            quantity: 1,
+                            unitPrice: price,
+                            total: price
+                        }
+                    ],
+                    subtotal: price,
+                    tax: 0,
+                    total: price,
+                    balance: price
+                }
+            });
+        }
+
         await prisma.appointment.update({
             where: { id: id as string },
             data: { status: AppointmentStatus.CHECKED_IN }
@@ -159,7 +211,7 @@ export const searchPatients = async (req: Request, res: Response) => {
 
 export const registerPatient = async (req: Request, res: Response) => {
     try {
-        const { firstName, lastName, email, phone, dateOfBirth, gender, address } = req.body;
+        const { firstName, lastName, email, phone, dateOfBirth, gender, address, insuranceProvider, insurancePolicyNumber, coveragePercentage, insuranceValidUntil } = req.body;
 
         // 1. Create User/Account
         // If email is provided, check existence. If not, generate dummy or fail?
@@ -173,6 +225,14 @@ export const registerPatient = async (req: Request, res: Response) => {
 
         const existingUser = await prisma.user.findUnique({ where: { email: userEmail } });
         if (existingUser) return res.status(400).json({ message: 'Email already registered' });
+
+        // Check for existing phone number to prevent duplicates
+        const existingPhone = await prisma.patient.findFirst({ where: { phone: phone } });
+        if (existingPhone) {
+            return res.status(400).json({ 
+                message: 'A patient with this phone number is already registered' 
+            });
+        }
 
         const defaultPassword = 'Oltra123!';
         const hashedPassword = await bcrypt.hash(defaultPassword, 10);
@@ -204,7 +264,22 @@ export const registerPatient = async (req: Request, res: Response) => {
             }
         });
 
-        // 3. Send credentials email if email provided
+        // 3. Create Insurance Record if provided
+        if (insuranceProvider && insurancePolicyNumber) {
+            await prisma.patientInsurance.create({
+                data: {
+                    patientId: patient.id,
+                    provider: insuranceProvider,
+                    policyNumber: insurancePolicyNumber,
+                    coveragePercentage: coveragePercentage ? parseFloat(coveragePercentage) : 100,
+                    isPrimary: true,
+                    status: 'PENDING', // Requires verification by admin/accountant
+                    ...(insuranceValidUntil && { validUntil: new Date(insuranceValidUntil) })
+                }
+            });
+        }
+
+        // 4. Send credentials email if email provided
         if (email) {
             try {
                 await sendCredentialsEmail(email, `${firstName} ${lastName}`, 'PATIENT', patientNumber);
@@ -218,6 +293,7 @@ export const registerPatient = async (req: Request, res: Response) => {
         res.status(201).json({ 
             message: 'Patient registered successfully', 
             patient,
+            hasInsurance: !!(insuranceProvider && insurancePolicyNumber),
             credentials: {
                 email: userEmail,
                 password: defaultPassword,

@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
+import { createNotification } from './notification.controller';
+import { sendToUser } from '../services/notification.service';
 
 // Validation schema for prescription availability check
 const checkAvailabilitySchema = z.object({
@@ -141,6 +143,18 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
 
         if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
 
+        // PRE-PAYMENT GATE: Verify payment cleared before dispensing ANY medication
+        const patientUnpaid = await prisma.invoice.findMany({
+            where: { patientId: prescription.patientId, balance: { gt: 0 } },
+            take: 1
+        });
+        if (patientUnpaid.length > 0) {
+            return res.status(402).json({
+                message: `Payment required before dispensing. Outstanding balance: ₦${patientUnpaid[0].balance.toLocaleString()}`,
+                requiredPayment: patientUnpaid[0].balance
+            });
+        }
+
         // Check if prescription has expired
         if (prescription.expiryDate && new Date() > prescription.expiryDate) {
             return res.status(400).json({ 
@@ -204,23 +218,31 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // Payment verification (unless SKIP_INVOICE_CHECK is enabled for testing)
-        if (process.env.SKIP_INVOICE_CHECK !== 'true') {
-            // Check if there's an existing unpaid invoice OR a paid invoice for this encounter
-            const hasValidInvoice = existingInvoice || await prisma.invoice.findFirst({
+        // Payment verification - ALWAYS enforced for production integrity
+        // Check ServicePaymentStatus on the prescription
+        if (prescription.paymentStatus !== 'CLEARED' && prescription.paymentStatus !== 'WAIVED') {
+            // Also check if there's a PAID invoice (backward compat)
+            const hasPaidInvoice = await prisma.invoice.findFirst({
                 where: {
                     patientId: prescription.patientId,
                     status: 'PAID',
                     medicalRecordId: prescription.medicalRecordId
                 }
             });
-            
-            if (!hasValidInvoice) {
-                return res.status(402).json({ 
-                    message: "Payment required before dispensing. No valid invoice found.",
-                    requiresPayment: true
+
+            if (!hasPaidInvoice) {
+                return res.status(402).json({
+                    message: "Payment required before dispensing. Payment must be cleared.",
+                    requiresPayment: true,
+                    paymentStatus: prescription.paymentStatus
                 });
             }
+
+            // Auto-clear if invoice is PAID
+            await prisma.prescription.update({
+                where: { id: prescriptionId },
+                data: { paymentStatus: 'CLEARED', clearedAt: new Date() }
+            });
         }
 
         const result = await prisma.$transaction(async (tx) => {
@@ -419,6 +441,44 @@ export const getDispensingReport = async (req: AuthRequest, res: Response) => {
     }
 };
 
+/**
+ * Get prescriptions with refill requests
+ * Returns prescriptions that have been requested for refill
+ */
+export const getRefillRequests = async (req: AuthRequest, res: Response) => {
+    try {
+        const prescriptions = await prisma.prescription.findMany({
+            where: {
+                status: 'REFILL_REQUESTED'
+            },
+            include: {
+                patient: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        patientNumber: true,
+                        phone: true
+                    }
+                },
+                medicalRecord: {
+                    include: {
+                        doctor: {
+                            include: { user: { select: { firstName: true, lastName: true } } }
+                        }
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.json(prescriptions);
+    } catch (error) {
+        console.error("Get Refill Requests Error:", error);
+        res.status(500).json({ message: 'Failed to fetch refill requests' });
+    }
+};
+
 export const createInvoice = async (req: AuthRequest, res: Response) => {
     try {
         const { prescriptionId } = req.body;
@@ -436,11 +496,36 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         const unitPrice = medication.price;
         const totalLinePrice = prescription.quantity * unitPrice;
 
+        // Check for active insurance
+        const activeInsurance = await prisma.patientInsurance.findFirst({
+            where: {
+                patientId: prescription.patientId,
+                status: { in: ['ACTIVE', 'VERIFIED'] },
+                OR: [
+                    { validUntil: { gte: new Date() } },
+                    { validUntil: null }
+                ],
+                isPrimary: true
+            }
+        });
+
+        let insuranceCoveredAmount = 0;
+        let patientResponsibility = totalLinePrice;
+        let patientInsuranceId: string | undefined;
+
+        if (activeInsurance) {
+            const coveragePercent = activeInsurance.coveragePercentage / 100;
+            insuranceCoveredAmount = Math.round(totalLinePrice * coveragePercent * 100) / 100;
+            patientResponsibility = totalLinePrice - insuranceCoveredAmount;
+            patientInsuranceId = activeInsurance.id;
+        }
+
         const invoice = await prisma.invoice.create({
             data: {
                 invoiceNumber: generateInvoiceNumber('INV-RX'),
                 patientId: prescription.patientId,
                 medicalRecordId: prescription.medicalRecordId,
+                prescriptionId: prescriptionId,
                 status: 'ISSUED',
                 items: [
                     {
@@ -453,7 +538,10 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                 subtotal: totalLinePrice,
                 tax: 0,
                 total: totalLinePrice,
-                balance: totalLinePrice
+                balance: patientResponsibility,
+                insuranceCoveredAmount,
+                patientResponsibility,
+                patientInsuranceId
             }
         });
 
@@ -461,5 +549,177 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     } catch (error) {
         console.error("Create Invoice Error:", error);
         res.status(500).json({ message: 'Failed to create invoice' });
+    }
+};
+
+/**
+ * Patient submits payment for a prescription
+ * Moves paymentStatus from AWAITING_PAYMENT to PAYMENT_SUBMITTED
+ */
+export const submitPayment = async (req: AuthRequest, res: Response) => {
+    try {
+        const { prescriptionId } = req.body;
+        const userId = req.user?.id;
+        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+        const prescription = await prisma.prescription.findUnique({
+            where: { id: prescriptionId },
+            include: {
+                patient: { select: { firstName: true, lastName: true } }
+            }
+        });
+
+        if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+
+        if (prescription.paymentStatus !== 'AWAITING_PAYMENT') {
+            return res.status(400).json({
+                message: `Cannot submit payment. Current status: ${prescription.paymentStatus}`
+            });
+        }
+
+        const updated = await prisma.prescription.update({
+            where: { id: prescriptionId },
+            data: { paymentStatus: 'PAYMENT_SUBMITTED' }
+        });
+
+        // Notify finance/accountant staff
+        const staffUsers = await prisma.staff.findMany({
+            where: { user: { role: { in: ['ACCOUNTANT', 'ADMIN'] } } },
+            select: { userId: true }
+        });
+
+        const notificationMessage = `Payment submitted for prescription "${prescription.medicationName}" - ${prescription.patient.firstName} ${prescription.patient.lastName}`;
+        for (const staff of staffUsers) {
+            await createNotification(staff.userId, notificationMessage, 'HIGH', 'IN_APP');
+            sendToUser(staff.userId, {
+                type: 'alert',
+                title: 'Pharmacy Payment Submitted',
+                message: notificationMessage,
+                data: { prescriptionId: prescription.id, action: 'payment_submitted' }
+            });
+        }
+
+        res.json({ message: 'Payment submitted. Awaiting confirmation.', prescription: updated });
+    } catch (error) {
+        console.error('Submit Payment Error:', error);
+        res.status(500).json({ message: 'Failed to submit payment' });
+    }
+};
+
+/**
+ * Staff confirms payment clearance for a prescription
+ * Moves paymentStatus to CLEARED
+ */
+export const clearPayment = async (req: AuthRequest, res: Response) => {
+    try {
+        const { prescriptionId } = req.body;
+        const userId = req.user?.id;
+        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+        const staff = await prisma.staff.findUnique({ where: { userId } });
+        if (!staff) return res.status(403).json({ message: 'Staff profile not found' });
+
+        const prescription = await prisma.prescription.findUnique({
+            where: { id: prescriptionId },
+            include: {
+                medicalRecord: {
+                    include: { patient: { select: { userId: true, firstName: true, lastName: true } } }
+                }
+            }
+        });
+
+        if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+
+        if (prescription.paymentStatus === 'CLEARED' || prescription.paymentStatus === 'WAIVED') {
+            return res.status(400).json({ message: `Payment already ${prescription.paymentStatus.toLowerCase()}` });
+        }
+
+        const updated = await prisma.prescription.update({
+            where: { id: prescriptionId },
+            data: {
+                paymentStatus: 'CLEARED',
+                clearedAt: new Date(),
+                clearedById: staff.id
+            }
+        });
+
+        // Notify patient
+        if (prescription.medicalRecord?.patient?.userId) {
+            const patientMessage = `Payment cleared for prescription "${prescription.medicationName}". Ready for dispensing.`;
+            await createNotification(prescription.medicalRecord.patient.userId, patientMessage, 'HIGH', 'IN_APP');
+            sendToUser(prescription.medicalRecord.patient.userId, {
+                type: 'alert',
+                title: 'Pharmacy Payment Cleared',
+                message: patientMessage,
+                data: { prescriptionId: prescription.id, action: 'payment_cleared' }
+            });
+        }
+
+        res.json({ message: 'Payment cleared successfully', prescription: updated });
+    } catch (error) {
+        console.error('Clear Payment Error:', error);
+        res.status(500).json({ message: 'Failed to clear payment' });
+    }
+};
+
+/**
+ * Admin waives payment for a prescription (emergency override)
+ * Moves paymentStatus to WAIVED
+ */
+export const waivePayment = async (req: AuthRequest, res: Response) => {
+    try {
+        const { prescriptionId, waiverReason } = req.body;
+        const userId = req.user?.id;
+        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Only admin can waive payments' });
+        }
+
+        const staff = await prisma.staff.findUnique({ where: { userId } });
+        if (!staff) return res.status(403).json({ message: 'Staff profile not found' });
+
+        const prescription = await prisma.prescription.findUnique({
+            where: { id: prescriptionId },
+            include: {
+                medicalRecord: {
+                    include: { patient: { select: { userId: true, firstName: true, lastName: true } } }
+                }
+            }
+        });
+
+        if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+
+        if (prescription.paymentStatus === 'WAIVED') {
+            return res.status(400).json({ message: 'Payment already waived' });
+        }
+
+        const updated = await prisma.prescription.update({
+            where: { id: prescriptionId },
+            data: {
+                paymentStatus: 'WAIVED',
+                clearedAt: new Date(),
+                clearedById: staff.id,
+                waiverReason: waiverReason || 'Emergency waiver'
+            }
+        });
+
+        // Notify patient
+        if (prescription.medicalRecord?.patient?.userId) {
+            const patientMessage = `Payment waived for prescription "${prescription.medicationName}". Reason: ${waiverReason || 'Emergency'}`;
+            await createNotification(prescription.medicalRecord.patient.userId, patientMessage, 'HIGH', 'IN_APP');
+            sendToUser(prescription.medicalRecord.patient.userId, {
+                type: 'alert',
+                title: 'Pharmacy Payment Waived',
+                message: patientMessage,
+                data: { prescriptionId: prescription.id, action: 'payment_waived' }
+            });
+        }
+
+        res.json({ message: 'Payment waived successfully', prescription: updated });
+    } catch (error) {
+        console.error('Waive Payment Error:', error);
+        res.status(500).json({ message: 'Failed to waive payment' });
     }
 };

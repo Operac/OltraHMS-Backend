@@ -28,18 +28,23 @@ const createPatientSchema = z.object({
   genotype: z.string().optional(),
   address: z.string(),
   emergencyContact: z.any().optional(), // JSON
+  // Insurance fields (optional)
+  insuranceProvider: z.string().optional(),
+  insurancePolicyNumber: z.string().optional(),
+  insuranceExpiry: z.string().or(z.date()).optional(),
+  coveragePercentage: z.number().optional(),
 });
 
 export const createPatient = async (req: AuthRequest, res: Response) => {
   try {
     const data = createPatientSchema.parse(req.body);
     
-    // Check for existing user email or phone
-    const existingEmail = await prisma.user.findUnique({ where: { email: data.email } });
+    // Check for existing user email or phone (only active/non-deleted records)
+    const existingEmail = await prisma.user.findFirst({ where: { email: data.email, isDeleted: false } });
     if (existingEmail) return res.status(400).json({ message: 'Email already in use' });
 
-    const existingPhone = await prisma.patient.findFirst({ where: { phone: data.phone } });
-    if (existingPhone) return res.status(400).json({ message: 'Phone number already registered' });
+    const existingPhone = await prisma.patient.findFirst({ where: { phone: data.phone, isDeleted: false } });
+    if (existingPhone) return res.status(400).json({ message: 'A patient with this phone number is already registered' });
 
     // Generate ID
     const patientNumber = await generatePatientId();
@@ -83,6 +88,21 @@ export const createPatient = async (req: AuthRequest, res: Response) => {
 
       return patient;
     });
+
+    // 3. Create PatientInsurance if insurance fields provided
+    if (data.insuranceProvider && data.insurancePolicyNumber) {
+      await prisma.patientInsurance.create({
+        data: {
+          patientId: result.id,
+          provider: data.insuranceProvider,
+          policyNumber: data.insurancePolicyNumber,
+          coveragePercentage: data.coveragePercentage || 100,
+          isPrimary: true,
+          status: 'PENDING', // requires verification
+          ...(data.insuranceExpiry && { validUntil: new Date(data.insuranceExpiry) })
+        }
+      });
+    }
 
     await logAudit(req.user?.id || 'SYSTEM', 'CREATE_PATIENT', `Created patient ${result.patientNumber}`, req.ip || 'unknown');
 
@@ -185,7 +205,21 @@ export const getPatientById = async (req: AuthRequest, res: Response) => {
 
         if (!patient) return res.status(404).json({ message: 'Patient not found' });
 
-        res.json(patient);
+        // Calculate Outstanding Balance for staff visibility
+        const openInvoices = await prisma.invoice.findMany({
+            where: {
+                patientId: patient.id,
+                status: { in: ['ISSUED', 'PARTIAL'] }
+            }
+        });
+        const outstandingBalance = openInvoices.reduce((acc, curr) => acc + curr.balance, 0);
+        const hasUnpaidInvoices = outstandingBalance > 0;
+
+        res.json({
+            ...patient,
+            outstandingBalance,
+            hasUnpaidInvoices
+        });
     } catch (error) {
         res.status(500).json({ message: 'Failed to fetch patient details' });
     }
@@ -314,6 +348,26 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
         if (!existingPatient) {
             console.log('No patient record found for userId:', userId);
             return res.status(404).json({ message: 'Patient profile not found. Please contact support.' });
+        }
+
+        // Check for email conflicts (if email is being updated)
+        if (email) {
+            const conflictingEmail = await prisma.user.findFirst({
+                where: { email, isDeleted: false, id: { not: userId } }
+            });
+            if (conflictingEmail) {
+                return res.status(400).json({ message: 'Email already in use by another patient' });
+            }
+        }
+
+        // Check for phone conflicts (if phone is being updated)
+        if (phone) {
+            const conflictingPhone = await prisma.patient.findFirst({
+                where: { phone, isDeleted: false, userId: { not: userId } }
+            });
+            if (conflictingPhone) {
+                return res.status(400).json({ message: 'Phone number already in use by another patient' });
+            }
         }
 
         // Perform updates in a transaction

@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { AppointmentStatus, PrescriptionStatus, LabStatus, InvoiceStatus, LabPriority } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { getDiagnosisSuggestions } from '../services/ai.service';
 
 // Helper function to generate unique invoice numbers
 const generateInvoiceNumber = (prefix: string): string => {
@@ -142,6 +143,18 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
             billingItems // Optional: Array of { description, amount }
         } = req.body;
 
+        // PRE-PAYMENT GATE: Check if patient has cleared payment before consultation
+        const unpaidInvoices = await prisma.invoice.findMany({
+            where: { patientId, balance: { gt: 0 } },
+            take: 1
+        });
+        if (unpaidInvoices.length > 0) {
+            return res.status(402).json({
+                message: `Payment required before consultation. Outstanding balance: ₦${unpaidInvoices[0].balance.toLocaleString()}`,
+                requiredPayment: unpaidInvoices[0].balance
+            });
+        }
+
         // 1. Create Medical Record
         const record = await prisma.medicalRecord.create({
             data: {
@@ -198,7 +211,54 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // 5. Generate Invoice
+        // 5. Generate AI Suggestions (non-blocking, best effort)
+        let aiSuggestions = null;
+        try {
+            const patient = await prisma.patient.findUnique({
+                where: { id: patientId },
+                select: { dateOfBirth: true, gender: true, allergies: true, chronicConditions: true }
+            });
+
+            const latestVitals = await prisma.vitalSigns.findFirst({
+                where: { patientId },
+                orderBy: { recordedAt: 'desc' }
+            });
+
+            const existingMeds = await prisma.prescription.findMany({
+                where: { patientId, status: { in: ['PENDING', 'DISPENSED'] } },
+                select: { medicationName: true, dosage: true, frequency: true }
+            });
+
+            aiSuggestions = await getDiagnosisSuggestions({
+                age: patient?.dateOfBirth ? Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
+                gender: patient?.gender || undefined,
+                allergies: Array.isArray(patient?.allergies) ? patient.allergies as string[] : [],
+                chronicConditions: Array.isArray(patient?.chronicConditions) ? patient.chronicConditions as string[] : [],
+                chiefComplaint: soap.subjective,
+                subjective: soap.subjective,
+                objective: soap.objective,
+                vitals: latestVitals ? {
+                    bpSystolic: latestVitals.bpSystolic || undefined,
+                    bpDiastolic: latestVitals.bpDiastolic || undefined,
+                    heartRate: latestVitals.heartRate || undefined,
+                    temperature: latestVitals.temperature || undefined,
+                    respiratoryRate: latestVitals.respiratoryRate || undefined,
+                    oxygenSaturation: latestVitals.oxygenSaturation || undefined,
+                } : undefined,
+                medications: existingMeds.map(m => ({ name: m.medicationName, dosage: m.dosage, frequency: m.frequency }))
+            });
+
+            if (aiSuggestions) {
+                await prisma.medicalRecord.update({
+                    where: { id: record.id },
+                    data: { aiSuggestions: aiSuggestions as any }
+                });
+            }
+        } catch (aiError) {
+            console.error('AI suggestion generation failed (non-blocking):', aiError);
+        }
+
+        // 6. Generate Invoice (insurance-aware)
         // Base consultation fee from service catalog - MUST be configured by admin
         const consService = await prisma.service.findFirst({ where: { name: { contains: 'Consultation', mode: 'insensitive' } } });
         
@@ -217,6 +277,30 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
         
         const subtotal = invoiceItems.reduce((sum: number, item: any) => sum + (item.amount * item.quantity), 0);
         
+        // Check for active insurance
+        const activeInsurance = await prisma.patientInsurance.findFirst({
+            where: {
+                patientId,
+                status: { in: ['ACTIVE', 'VERIFIED'] },
+                OR: [
+                    { validUntil: { gte: new Date() } },
+                    { validUntil: null }
+                ],
+                isPrimary: true
+            }
+        });
+
+        let insuranceCoveredAmount = 0;
+        let patientResponsibility = subtotal;
+        let patientInsuranceId: string | undefined;
+
+        if (activeInsurance) {
+            const coveragePercent = activeInsurance.coveragePercentage / 100;
+            insuranceCoveredAmount = Math.round(subtotal * coveragePercent * 100) / 100;
+            patientResponsibility = subtotal - insuranceCoveredAmount;
+            patientInsuranceId = activeInsurance.id;
+        }
+
         const invoice = await prisma.invoice.create({
             data: {
                 invoiceNumber: generateInvoiceNumber('INV'),
@@ -225,8 +309,11 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
                 items: invoiceItems,
                 subtotal,
                 tax: 0,
-                total: subtotal, // Simple tax logic for now
-                balance: subtotal,
+                total: subtotal,
+                balance: patientResponsibility,
+                insuranceCoveredAmount,
+                patientResponsibility,
+                patientInsuranceId,
                 status: InvoiceStatus.ISSUED
             }
         });
@@ -234,7 +321,8 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
         res.status(201).json({ 
             message: 'Consultation saved successfully', 
             recordId: record.id,
-            invoiceId: invoice.id 
+            invoiceId: invoice.id,
+            aiSuggestions 
         });
 
     } catch (error: any) {

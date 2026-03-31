@@ -14,7 +14,8 @@ export const getSystemStats = async (req: AuthRequest, res: Response) => {
             totalPatients,
             activeStaff,
             todayAppointments,
-            unpaidInvoices
+            unpaidInvoices,
+            totalInpatients
         ] = await Promise.all([
             prisma.patient.count(),
             prisma.user.count({ where: { role: { not: 'PATIENT' }, status: 'ACTIVE' } }),
@@ -29,14 +30,16 @@ export const getSystemStats = async (req: AuthRequest, res: Response) => {
             prisma.invoice.aggregate({
                 where: { status: 'ISSUED' },
                 _sum: { total: true }
-            })
+            }),
+            prisma.admission.count({ where: { status: 'ADMITTED' } })
         ]);
 
         res.json({
             totalPatients,
             activeStaff,
             todayAppointments,
-            revenuePending: unpaidInvoices._sum.total || 0
+            revenuePending: unpaidInvoices._sum.total || 0,
+            totalInpatients
         });
     } catch (error) {
         console.error("Stats Error:", error);

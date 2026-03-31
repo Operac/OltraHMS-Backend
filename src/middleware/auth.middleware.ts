@@ -22,8 +22,9 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
   try {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error("JWT_SECRET is not defined");
-    const decoded = jwt.verify(token, secret) as any;
-    req.user = decoded;
+    // jwt.verify returns a promise when no callback is provided
+    const decoded = await jwt.verify(token, secret);
+    req.user = decoded as any;
     next();
   } catch (error) {
     res.status(401).json({ message: 'Invalid token' });

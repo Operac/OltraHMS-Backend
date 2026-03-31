@@ -88,6 +88,18 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
         
         if (!medicalRecord) return res.status(404).json({ message: 'Medical Record not found' });
 
+        // PRE-PAYMENT GATE: Verify payment cleared before issuing new prescriptions
+        const unpaidInvoices = await prisma.invoice.findMany({
+            where: { patientId: medicalRecord.patientId, balance: { gt: 0 } },
+            take: 1
+        });
+        if (unpaidInvoices.length > 0) {
+            return res.status(402).json({
+                message: `Payment required before issuing prescriptions. Outstanding balance: ₦${unpaidInvoices[0].balance.toLocaleString()}`,
+                requiredPayment: unpaidInvoices[0].balance
+            });
+        }
+
         const prescription = await prisma.prescription.create({
             data: {
                 medicalRecordId,

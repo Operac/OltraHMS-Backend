@@ -38,9 +38,11 @@ export const generatePayroll = async (req: AuthRequest, res: Response) => {
             if (existingStaffIds.has(staff.id)) continue;
 
             const baseSalary = staff.baseSalary || 0;
-            const bonuses = 0; // Default for now
-            const deductions = 0; // Default
-            const tax = 0; // Admin should input tax after generation
+            // Fetch actual bonuses and deductions from staff record
+            const bonuses = (staff as any).bonusAmount || 0;
+            const deductions = (staff as any).monthlyDeductions || 0;
+            // Tax calculation: basic 10% on gross for now, should be configurable
+            const tax = Math.round((baseSalary + bonuses) * 0.1);
             const netSalary = baseSalary + bonuses - deductions - tax;
 
             payrolls.push({

@@ -2,6 +2,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { prisma } from '../lib/prisma';
+import { startOfDay, endOfDay, addDays } from 'date-fns';
 
 /**
  * Get all Operating Theaters
@@ -24,12 +25,25 @@ export const getTheaters = async (req: AuthRequest, res: Response) => {
 export const scheduleSurgery = async (req: AuthRequest, res: Response) => {
     try {
         const { patientId, leadSurgeonId, theaterId, scheduledStart, scheduledEnd, priority, notes, preOpDiagnosis } = req.body;
+
+        // PRE-PAYMENT GATE: Verify payment cleared before scheduling surgery
+        const unpaidInvoices = await prisma.invoice.findMany({
+            where: { patientId, balance: { gt: 0 } },
+            take: 1
+        });
+        if (unpaidInvoices.length > 0) {
+            return res.status(402).json({
+                message: `Payment required before surgery. Outstanding balance: ₦${unpaidInvoices[0].balance.toLocaleString()}`,
+                requiredPayment: unpaidInvoices[0].balance
+            });
+        }
         
         // Basic Conflict Check
         const start = new Date(scheduledStart);
         const end = new Date(scheduledEnd);
 
-        const conflicting = await prisma.surgeryCase.findFirst({
+        // Check theater availability
+        const theaterConflict = await prisma.surgeryCase.findFirst({
             where: {
                 theaterId,
                 status: { not: 'CANCELLED' },
@@ -42,8 +56,26 @@ export const scheduleSurgery = async (req: AuthRequest, res: Response) => {
             }
         });
 
-        if (conflicting) {
+        if (theaterConflict) {
             return res.status(409).json({ message: 'Theater is already booked for this time slot.' });
+        }
+        
+        // Check surgeon availability
+        const surgeonConflict = await prisma.surgeryCase.findFirst({
+            where: {
+                leadSurgeonId,
+                status: { not: 'CANCELLED' },
+                OR: [
+                    {
+                        scheduledStart: { lt: end },
+                        scheduledEnd: { gt: start }
+                    }
+                ]
+            }
+        });
+        
+        if (surgeonConflict) {
+            return res.status(409).json({ message: 'Lead surgeon is not available at this time. They may have another surgery scheduled.' });
         }
 
         const surgery = await prisma.surgeryCase.create({
@@ -82,14 +114,12 @@ export const getSchedule = async (req: AuthRequest, res: Response) => {
         const where: any = { status: { not: 'CANCELLED' } };
         
         if (date) {
-            const dayStart = new Date(String(date));
-            dayStart.setHours(0,0,0,0);
-            const dayEnd = new Date(dayStart);
-            dayEnd.setDate(dayEnd.getDate() + 1);
+            const dayStart = startOfDay(new Date(String(date)));
+            const dayEnd = endOfDay(new Date(String(date)));
             
             where.scheduledStart = {
                 gte: dayStart,
-                lt: dayEnd
+                lte: dayEnd
             };
         }
 

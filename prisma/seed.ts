@@ -17,16 +17,25 @@ async function main() {
   console.log('🧹 Cleaning up database...');
   await prisma.auditLog.deleteMany();
   await prisma.notification.deleteMany();
+  await prisma.medicationLog.deleteMany();
+  await prisma.wellnessReminder.deleteMany();
+  await prisma.wellnessSymptom.deleteMany();
+  await prisma.wellnessSleep.deleteMany();
+  await prisma.wellnessMood.deleteMany();
+  await prisma.wellnessVitals.deleteMany();
+  await prisma.wellnessMedication.deleteMany();
   await prisma.videoSession.deleteMany();
   await prisma.radiologyReport.deleteMany();
   await prisma.radiologyRequest.deleteMany();
   await prisma.labResult.deleteMany();
   await prisma.labOrder.deleteMany();
-  await prisma.payment.deleteMany();
+  await prisma.claimItem.deleteMany();
   await prisma.insuranceClaim.deleteMany();
+  await prisma.payment.deleteMany();
   await prisma.invoice.deleteMany();
   await prisma.dispensing.deleteMany();
   await prisma.medicationAdministration.deleteMany();
+  await prisma.refillRequest.deleteMany();
   await prisma.prescription.deleteMany();
   await prisma.inventoryBatch.deleteMany();
   await prisma.medication.deleteMany();
@@ -37,14 +46,16 @@ async function main() {
   await prisma.ward.deleteMany();
   await prisma.referral.deleteMany();
   await prisma.medicalRecord.deleteMany();
+  await prisma.triage.deleteMany();
+  await prisma.vitalSigns.deleteMany();
   await prisma.appointment.deleteMany();
   await prisma.surgeryCase.deleteMany();
   await prisma.patientInsurance.deleteMany();
-  await prisma.triage.deleteMany();
-  await prisma.vitalSigns.deleteMany();
+  await prisma.feedback.deleteMany();
+  await prisma.expense.deleteMany();
   await prisma.symptomLog.deleteMany();
   await prisma.wellnessGoal.deleteMany();
-  await prisma.refillRequest.deleteMany();
+  await prisma.staffDailyAvailability.deleteMany();
   await prisma.patient.deleteMany();
   await prisma.leaveRequest.deleteMany();
   await prisma.staffLeaveBalance.deleteMany();
@@ -52,7 +63,7 @@ async function main() {
   await prisma.payroll.deleteMany();
   await prisma.staff.deleteMany();
   await prisma.department.deleteMany();
-  await prisma.surgeryCase.deleteMany();
+  await prisma.tariffSchedule.deleteMany();
   await prisma.operatingTheater.deleteMany();
   await prisma.radiologyTest.deleteMany();
   await prisma.service.deleteMany();
@@ -851,12 +862,326 @@ async function main() {
     });
   }
 
+  // ─── TRIAGE ──────────────────────────────────────────────────────────────────
+  console.log('🩺 Creating Triage Records...');
+  // Create appointments checked-in without triage (pending triage queue)
+  const triageAppt1 = await prisma.appointment.create({
+    data: {
+      patientId: patients[5].id, doctorId: doctors[0].staff.id,
+      appointmentDate: new Date(), startTime: new Date(), endTime: hoursAhead(1),
+      type: AppointmentType.FIRST_VISIT, status: AppointmentStatus.CHECKED_IN,
+      reason: 'Persistent headache and dizziness for 2 days',
+    },
+  });
+  const triageAppt2 = await prisma.appointment.create({
+    data: {
+      patientId: patients[6].id, doctorId: doctors[1].staff.id,
+      appointmentDate: new Date(), startTime: new Date(), endTime: hoursAhead(1),
+      type: AppointmentType.FOLLOW_UP, status: AppointmentStatus.CHECKED_IN,
+      reason: 'Post-operative wound check',
+    },
+  });
+  // Create vital signs for triage, then link triage to them
+  const triageVitals1 = await prisma.vitalSigns.create({
+    data: {
+      patientId: patients[0].id,
+      temperature: 39.2, bpSystolic: 140, bpDiastolic: 90,
+      heartRate: 105, respiratoryRate: 20, oxygenSaturation: 96,
+      weight: 78.5, recordedAt: daysAgo(3),
+    },
+  });
+  await prisma.triage.create({
+    data: {
+      patientId: patients[0].id, nurseId: nurseStaff.id,
+      vitalSignsId: triageVitals1.id,
+      chiefComplaint: 'Fever and headaches for 3 days',
+      triageLevel: 'URGENT', mewsScore: 4,
+    },
+  });
+  const triageVitals2 = await prisma.vitalSigns.create({
+    data: {
+      patientId: patients[2].id,
+      temperature: 38.8, bpSystolic: 100, bpDiastolic: 65,
+      heartRate: 110, respiratoryRate: 24, oxygenSaturation: 97,
+      weight: 15.2, height: 105, recordedAt: daysAgo(1),
+    },
+  });
+  await prisma.triage.create({
+    data: {
+      patientId: patients[2].id, nurseId: nurseStaff.id,
+      vitalSignsId: triageVitals2.id,
+      chiefComplaint: 'Fever and rash for 2 days',
+      triageLevel: 'LESS_URGENT', mewsScore: 3,
+    },
+  });
+
+  // ─── TARIFF SCHEDULE ────────────────────────────────────────────────────────
+  console.log('💰 Creating Tariff Schedule...');
+  const allServices = await prisma.service.findMany();
+  const serviceMap = new Map(allServices.map(s => [s.name, s.id]));
+  const hmoNames = ['NHIS', 'Hygeia HMO', 'Reliance HMO'];
+  for (const hmo of hmoNames) {
+    for (const svc of allServices.slice(0, 5)) {
+      await prisma.tariffSchedule.create({
+        data: {
+          hmoName: hmo,
+          planName: hmo === 'NHIS' ? 'Federal Government Employee' : 'Standard',
+          serviceId: svc.id,
+          hmoPrice: svc.price * 0.8,
+        },
+      });
+    }
+  }
+
+  // ─── INSURANCE CLAIMS ───────────────────────────────────────────────────────
+  console.log('📋 Creating Insurance Claims...');
+  const ins0 = await prisma.patientInsurance.findFirst({ where: { patientId: patients[0].id } });
+  const ins3 = await prisma.patientInsurance.findFirst({ where: { patientId: patients[3].id } });
+  const claim1 = await prisma.insuranceClaim.create({
+    data: {
+      invoiceId: inv1.id, patientInsuranceId: ins0!.id, patientId: patients[0].id,
+      claimNumber: `CLM-2025-001`, insuranceProvider: 'NHIS',
+      submittedAmount: inv1Total, approvedAmount: inv1Total * 0.8,
+      status: 'PAID', submittedAt: daysAgo(2),
+    },
+  });
+  await prisma.claimItem.createMany({
+    data: [
+      { claimId: claim1.id, description: 'General Consultation', billedAmount: 15000, coveredAmount: 12000, patientPortion: 3000, status: 'APPROVED' },
+      { claimId: claim1.id, description: 'Artemether-Lumefantrine x24', billedAmount: 60000, coveredAmount: 48000, patientPortion: 12000, status: 'APPROVED' },
+      { claimId: claim1.id, description: 'Paracetamol 500mg x20', billedAmount: 10000, coveredAmount: 8000, patientPortion: 2000, status: 'APPROVED' },
+    ],
+  });
+  await prisma.insuranceClaim.create({
+    data: {
+      invoiceId: inv3.id, patientInsuranceId: ins3!.id, patientId: patients[3].id,
+      claimNumber: `CLM-2025-002`, insuranceProvider: 'Reliance HMO',
+      submittedAmount: inv3Total, status: 'SUBMITTED', submittedAt: hoursAgo(4),
+    },
+  });
+  await prisma.insuranceClaim.create({
+    data: {
+      invoiceId: inv7.id, patientInsuranceId: ins0!.id, patientId: patients[0].id,
+      claimNumber: `CLM-2025-003`, insuranceProvider: 'NHIS',
+      submittedAmount: inv7Total, status: 'DRAFT',
+    },
+  });
+
+  // ─── EXPENSES ───────────────────────────────────────────────────────────────
+  console.log('💸 Creating Expenses...');
+  await prisma.expense.createMany({
+    data: [
+      { recordedById: adminUser.id, category: 'UTILITIES', description: 'Monthly electricity bill', amount: 185000, incurredAt: daysAgo(5) },
+      { recordedById: adminUser.id, category: 'INVENTORY', description: 'Medical consumables restock', amount: 340000, incurredAt: daysAgo(3) },
+      { recordedById: adminUser.id, category: 'MAINTENANCE', description: 'AC servicing — 3 units', amount: 45000, incurredAt: daysAgo(1) },
+      { recordedById: accountantStaff.userId, category: 'SALARY', description: 'March 2025 payroll', amount: 8500000, incurredAt: new Date() },
+      { recordedById: adminUser.id, category: 'INVENTORY', description: 'Pharmaceutical order from supplier', amount: 520000, incurredAt: daysAgo(2) },
+    ],
+  });
+
+  // ─── REFILL REQUESTS ────────────────────────────────────────────────────────
+  console.log('💊 Creating Refill Requests...');
+  await prisma.refillRequest.create({
+    data: {
+      prescriptionId: presc1b.id, patientId: patients[0].id,
+      status: 'APPROVED', processedAt: daysAgo(1),
+      notes: 'Patient confirmed ongoing use for pain management',
+      processedById: pharmacistStaff.id,
+    },
+  });
+  const metforminPresc = await prisma.prescription.findFirst({ where: { patientId: patients[4].id, medicationName: 'Metformin 500mg' } });
+  await prisma.refillRequest.create({
+    data: {
+      prescriptionId: metforminPresc!.id, patientId: patients[4].id,
+      status: 'PENDING', notes: 'Patient running low on Metformin',
+    },
+  });
+
+  // ─── REFERRALS ──────────────────────────────────────────────────────────────
+  console.log('🔗 Creating Referrals...');
+  await prisma.referral.create({
+    data: {
+      medicalRecordId: record2.id, serviceName: 'Surgical Evaluation',
+      notes: 'Suspected acute appendicitis — needs urgent surgical review',
+      referredTo: 'Surgery Department',
+    },
+  });
+  await prisma.referral.create({
+    data: {
+      medicalRecordId: record7.id, serviceName: 'Cardiology Review',
+      notes: 'Uncontrolled hypertension — specialist evaluation needed',
+      referredTo: 'Cardiology Department',
+    },
+  });
+
+  // ─── FEEDBACK ───────────────────────────────────────────────────────────────
+  console.log('📝 Creating Patient Feedback...');
+  await prisma.feedback.createMany({
+    data: [
+      { patientId: patients[0].id, doctorId: doctors[0].staff.id, rating: 5, comment: 'Excellent care during my malaria treatment. Very thorough.', category: 'Doctor Bedside Manner' },
+      { patientId: patients[1].id, doctorId: doctors[1].staff.id, rating: 4, comment: 'Surgery went well. Ward staff were attentive. Food could be better.', category: 'Facility' },
+      { patientId: patients[3].id, doctorId: doctors[3].staff.id, rating: 5, comment: 'Telemedicine consultation was very convenient.', category: 'Telemedicine' },
+      { patientId: patients[5].id, rating: 3, comment: 'Waited over 2 hours before seeing the doctor.', category: 'Wait Time' },
+    ],
+  });
+
+  // ─── SYMPTOM LOGS ───────────────────────────────────────────────────────────
+  console.log('🤒 Creating Symptom Logs...');
+  await prisma.symptomLog.createMany({
+    data: [
+      { patientId: patients[0].id, symptoms: JSON.stringify(['Headache', 'mild nausea']), severity: 'MILD', notes: 'Post-malaria residual symptoms', loggedAt: daysAgo(1) },
+      { patientId: patients[4].id, symptoms: JSON.stringify(['Frequent urination', 'fatigue']), severity: 'MODERATE', notes: 'Diabetes-related', loggedAt: daysAgo(2) },
+      { patientId: patients[7].id, symptoms: JSON.stringify(['Lower back pain', 'swollen ankles']), severity: 'MILD', notes: 'Pregnancy-related — 38 weeks', loggedAt: hoursAgo(8) },
+    ],
+  });
+
+  // ─── STAFF DAILY AVAILABILITY ───────────────────────────────────────────────
+  console.log('📅 Creating Staff Daily Availability...');
+  for (const doc of doctors) {
+    for (let d = 0; d < 5; d++) {
+      const date = new Date();
+      date.setDate(date.getDate() + d);
+      await prisma.staffDailyAvailability.create({
+        data: {
+          staffId: doc.staff.id,
+          date: date,
+          status: 'AVAILABLE',
+        },
+      });
+    }
+  }
+
+  // ─── WELLNESS TRACKING (Patient-logged wellness data) ───────────────────────
+  console.log('🏋️ Creating Patient Wellness Data...');
+
+  // Wellness Vitals (schema: value is Float, value2 for diastolic)
+  const wellnessVitalTypes = [
+    { type: 'BLOOD_PRESSURE', min: 115, max: 140, unit: 'mmHg' },
+    { type: 'BLOOD_SUGAR', min: 5.0, max: 8.5, unit: 'mmol/L' },
+    { type: 'HEART_RATE', min: 65, max: 85, unit: 'bpm' },
+    { type: 'WEIGHT', min: 78.0, max: 79.0, unit: 'kg' },
+    { type: 'TEMPERATURE', min: 36.2, max: 37.0, unit: '°C' },
+  ];
+  for (const vt of wellnessVitalTypes) {
+    for (let d = 6; d >= 0; d--) {
+      const val = vt.min + Math.random() * (vt.max - vt.min);
+      await prisma.wellnessVitals.create({
+        data: {
+          patientId: patients[0].id,
+          type: vt.type,
+          value: vt.type === 'BLOOD_PRESSURE' ? 120 + Math.floor(Math.random() * 20) : parseFloat(val.toFixed(1)),
+          value2: vt.type === 'BLOOD_PRESSURE' ? 75 + Math.floor(Math.random() * 15) : null,
+          unit: vt.unit,
+          recordedAt: daysAgo(d),
+        },
+      });
+    }
+  }
+
+  // Wellness Medications (schema: times is JSON string, status not isActive)
+  const wellnessMed1 = await prisma.wellnessMedication.create({
+    data: {
+      patientId: patients[0].id, name: 'Amlodipine 5mg', dosage: '1 tablet',
+      frequency: 'ONCE_DAILY', times: JSON.stringify(['08:00']),
+      startDate: daysAgo(30), status: 'ACTIVE',
+    },
+  });
+  const wellnessMed2 = await prisma.wellnessMedication.create({
+    data: {
+      patientId: patients[4].id, name: 'Metformin 500mg', dosage: '2 tablets',
+      frequency: 'TWICE_DAILY', times: JSON.stringify(['08:00', '20:00']),
+      startDate: daysAgo(60), status: 'ACTIVE',
+    },
+  });
+  // Medication logs (schema: scheduledTime, takenAt, status)
+  for (let d = 6; d >= 0; d--) {
+    const sched1 = new Date(daysAgo(d)); sched1.setHours(8, 0, 0, 0);
+    const sched2a = new Date(daysAgo(d)); sched2a.setHours(8, 0, 0, 0);
+    const sched2b = new Date(daysAgo(d)); sched2b.setHours(20, 0, 0, 0);
+    await prisma.medicationLog.create({
+      data: {
+        medicationId: wellnessMed1.id, scheduledTime: sched1,
+        status: 'TAKEN', takenAt: sched1, notes: 'Taken with breakfast',
+      },
+    });
+    await prisma.medicationLog.create({
+      data: {
+        medicationId: wellnessMed2.id, scheduledTime: sched2a,
+        status: d === 3 ? 'MISSED' : 'TAKEN',
+        takenAt: d === 3 ? null : sched2a,
+        notes: d === 3 ? 'Forgot morning dose' : 'Taken with meals',
+      },
+    });
+    await prisma.medicationLog.create({
+      data: {
+        medicationId: wellnessMed2.id, scheduledTime: sched2b,
+        status: 'TAKEN', takenAt: sched2b, notes: 'Taken with dinner',
+      },
+    });
+  }
+
+  // Wellness Mood (schema: moodScore Int 1-10)
+  const moodScores = [7, 8, 6, 5, 7, 8, 9];
+  const stressLevels = [3, 2, 5, 6, 4, 3, 2];
+  for (let d = 6; d >= 0; d--) {
+    await prisma.wellnessMood.create({
+      data: {
+        patientId: patients[0].id,
+        moodScore: moodScores[6 - d], stressLevel: stressLevels[6 - d],
+        energyLevel: moodScores[6 - d] - 1,
+        notes: d === 3 ? 'Stressful day at work' : d === 6 ? 'Feeling great after treatment' : null,
+        recordedAt: daysAgo(d),
+      },
+    });
+  }
+
+  // Wellness Sleep (schema: quality is Int 1-10, not string)
+  for (let d = 6; d >= 0; d--) {
+    const bedtime = new Date(daysAgo(d));
+    bedtime.setHours(22, Math.floor(Math.random() * 30), 0, 0);
+    const wakeTime = new Date(daysAgo(d));
+    wakeTime.setHours(6, 15 + Math.floor(Math.random() * 30), 0, 0);
+    if (wakeTime <= bedtime) wakeTime.setDate(wakeTime.getDate() + 1);
+    const duration = Math.round((wakeTime.getTime() - bedtime.getTime()) / 60000);
+    await prisma.wellnessSleep.create({
+      data: {
+        patientId: patients[0].id, duration,
+        quality: duration > 420 ? 8 : duration > 360 ? 6 : 4,
+        bedtime, wakeTime,
+        notes: d === 3 ? 'Woke up twice during the night' : null,
+        recordedAt: daysAgo(d),
+      },
+    });
+  }
+
+  // Wellness Symptoms (schema: symptom not name, severity is Int)
+  await prisma.wellnessSymptom.createMany({
+    data: [
+      { patientId: patients[0].id, symptom: 'Headache', severity: 3, frequency: 'OCCASIONAL', notes: 'Resolved after paracetamol', recordedAt: daysAgo(2) },
+      { patientId: patients[0].id, symptom: 'Fatigue', severity: 5, frequency: 'FREQUENT', notes: 'Post-malaria recovery', recordedAt: daysAgo(5) },
+      { patientId: patients[4].id, symptom: 'Blurred Vision', severity: 5, frequency: 'OCCASIONAL', notes: 'Intermittent — related to blood sugar levels', recordedAt: daysAgo(1) },
+      { patientId: patients[4].id, symptom: 'Numbness in feet', severity: 3, frequency: 'FREQUENT', notes: 'Diabetic neuropathy screening recommended', recordedAt: daysAgo(3) },
+    ],
+  });
+
+  // Wellness Reminders (schema: frequency required, enabled not isActive)
+  await prisma.wellnessReminder.createMany({
+    data: [
+      { patientId: patients[0].id, title: 'Take Amlodipine', type: 'MEDICATION', time: '08:00', frequency: 'DAILY', enabled: true },
+      { patientId: patients[0].id, title: 'Record Blood Pressure', type: 'VITALS', time: '09:00', frequency: 'DAILY', enabled: true },
+      { patientId: patients[0].id, title: 'Log Mood', type: 'MOOD', time: '21:00', frequency: 'DAILY', enabled: true },
+      { patientId: patients[4].id, title: 'Take Metformin (Morning)', type: 'MEDICATION', time: '07:30', frequency: 'DAILY', enabled: true },
+      { patientId: patients[4].id, title: 'Take Metformin (Evening)', type: 'MEDICATION', time: '18:00', frequency: 'DAILY', enabled: true },
+      { patientId: patients[4].id, title: 'Check Blood Sugar', type: 'VITALS', time: '07:00', frequency: 'DAILY', enabled: true },
+    ],
+  });
+
   // ─── SUMMARY ───────────────────────────────────────────────────────────────
   console.log('\n✅ OltraHMS Seed Completed Successfully!\n');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🌐 Live URL: https://oltra-hms-frontend.vercel.app');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('📋 LOGIN CREDENTIALS (password for all: OltraHMS1!)');
+  console.log('📋 LOGIN CREDENTIALS (password for all: password123)');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('Role              Email');
   console.log('Admin             admin@oltrahms.com');
@@ -871,6 +1196,7 @@ async function main() {
   console.log('Receptionist      receptionist@oltrahms.com');
   console.log('Accountant        accountant@oltrahms.com');
   console.log('Radiologist       radiologist@oltrahms.com');
+  console.log('Insurance Officer insurance@oltrahms.com');
   console.log('Patient           patient@oltrahms.com');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('📊 Seeded Data Summary:');
@@ -879,16 +1205,24 @@ async function main() {
   console.log('  • 5 doctors across specialties');
   console.log('  • 8 supporting staff roles');
   console.log('  • 10 medications with 2 FEFO batches each');
-  console.log('  • 8 appointments (past, present, upcoming)');
+  console.log('  • 10 appointments (past, present, upcoming, checked-in)');
+  console.log('  • 2 triage records (completed) + 2 pending triage');
   console.log('  • 2 video/telemedicine sessions (1 completed, 1 scheduled)');
   console.log('  • 2 surgery cases (1 completed, 1 scheduled C-section)');
   console.log('  • Lab orders with results + pending');
   console.log('  • Radiology requests with reports');
   console.log('  • Inpatient admission with ward rounds + fluid balance + MAR');
   console.log('  • 5 invoices (paid, partial, issued)');
+  console.log('  • 3 insurance claims (paid, submitted, draft) with claim items');
+  console.log('  • 5 expenses across categories');
+  console.log('  • 2 refill requests (1 approved, 1 pending)');
+  console.log('  • 2 referrals (1 completed, 1 pending)');
+  console.log('  • 4 patient feedback entries');
+  console.log('  • 7 tariff schedule entries');
+  console.log('  • Staff daily availability for all doctors (5 days)');
+  console.log('  • Wellness: vitals (5 types x 7 days), medications with logs');
+  console.log('  • Wellness: mood, sleep, symptoms, reminders');
   console.log('  • Payroll for all staff (Feb paid, March pending)');
-  console.log('  • Insurance records (active, expired)');
-  console.log('  • Wellness vitals tracking (7 days)');
   console.log('  • Audit logs + notifications');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 }

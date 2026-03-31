@@ -67,6 +67,27 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
 
         const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
         if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+        
+        // CRITICAL: Validate payment doesn't exceed balance
+        if (numericAmount > invoice.balance) {
+            return res.status(400).json({
+                message: `Payment amount exceeds outstanding balance. Max payable: ₦${invoice.balance.toLocaleString()}`,
+                maxPayable: invoice.balance,
+                amountRequested: numericAmount
+            });
+        }
+
+        // VALIDATION: Prevent payments exceeding outstanding balance
+        if (numericAmount > invoice.balance) {
+            return res.status(400).json({ 
+                message: `Payment amount exceeds outstanding balance. Outstanding: ₦${invoice.balance.toLocaleString()}. Max payable: ₦${invoice.balance.toLocaleString()}` 
+            });
+        }
+
+        // VALIDATION: Prevent negative amounts
+        if (numericAmount <= 0) {
+            return res.status(400).json({ message: 'Payment amount must be greater than zero' });
+        }
 
         const result = await prisma.$transaction(async (tx) => {
             // 1. Create Payment Record
@@ -91,7 +112,7 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
                 where: { id: invoiceId },
                 data: {
                     amountPaid: newAmountPaid,
-                    balance: newBalance,
+                    balance: Math.max(newBalance, 0),  // Prevent negative balance
                     status: newStatus
                 }
             });
@@ -130,6 +151,11 @@ export const processRefund = async (req: AuthRequest, res: Response) => {
         const refundAmount = parseFloat(amount);
         const maxRefundable = invoice.amountPaid;
 
+        // Validate refund amount
+        if (refundAmount <= 0) {
+            return res.status(400).json({ message: 'Refund amount must be greater than zero' });
+        }
+
         if (refundAmount > maxRefundable) {
             return res.status(400).json({ 
                 message: `Maximum refundable amount is ₦${maxRefundable}. Cannot refund more than amount paid.` 
@@ -149,9 +175,13 @@ export const processRefund = async (req: AuthRequest, res: Response) => {
                 }
             });
 
-            // 2. Update Invoice
+            // 2. Update Invoice with balance check to prevent negative
             const newAmountPaid = invoice.amountPaid - refundAmount;
             const newBalance = invoice.total - newAmountPaid;
+            
+            if (newBalance < 0) {
+                throw new Error('Refund would create negative balance. Please verify invoice total.');
+            }
             
             const newStatus = newBalance <= 0 ? 'PAID' : 'PARTIAL';
 
@@ -159,7 +189,7 @@ export const processRefund = async (req: AuthRequest, res: Response) => {
                 where: { id: invoiceId },
                 data: {
                     amountPaid: newAmountPaid,
-                    balance: newBalance,
+                    balance: Math.max(newBalance, 0),  // Prevent negative balance
                     status: newStatus
                 }
             });

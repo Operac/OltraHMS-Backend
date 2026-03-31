@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createAppointment, getAppointments, updateAppointmentStatus, getAppointmentById, rescheduleAppointment } from '../controllers/appointment.controller';
+import { createAppointment, getAppointments, updateAppointmentStatus, getAppointmentById, rescheduleAppointment, submitAppointmentPayment, clearAppointmentPayment, waiveAppointmentPayment } from '../controllers/appointment.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -15,5 +15,10 @@ router.patch('/:id/status', authorize(['ADMIN', 'DOCTOR', 'PATIENT', 'RECEPTIONI
 
 // Reschedule
 router.patch('/:id/reschedule', authorize(['ADMIN', 'DOCTOR', 'PATIENT', 'RECEPTIONIST']) as any, rescheduleAppointment as any);
+
+// Payment gate endpoints
+router.post('/:id/submit-payment', authorize(['PATIENT']) as any, submitAppointmentPayment as any);
+router.post('/:id/clear-payment', authorize(['ADMIN', 'ACCOUNTANT', 'RECEPTIONIST']) as any, clearAppointmentPayment as any);
+router.post('/:id/waive-payment', authorize(['ADMIN']) as any, waiveAppointmentPayment as any);
 
 export default router;

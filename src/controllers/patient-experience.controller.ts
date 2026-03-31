@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { AppointmentStatus, PrescriptionStatus, Role } from '@prisma/client';
 import { generateJitsiToken, generateRoomName, getJitsiConfig } from '../services/jitsi.service';
+import { createNotification } from './notification.controller';
 
 // Helper to get patient context
 const getPatientContext = async (userId: string) => {
@@ -119,10 +120,132 @@ export const requestRefill = async (req: AuthRequest, res: Response) => {
                 }
             });
         }
-
+        
         res.json({ message: 'Refill request submitted' });
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to request refill' });
+    }
+};
+
+// Approve refill request (pharmacist)
+export const approveRefill = async (req: AuthRequest, res: Response) => {
+    try {
+        const prescriptionId = req.params.prescriptionId as string;
+        const pharmacist = await prisma.staff.findUnique({ 
+            where: { userId: req.user!.id },
+            include: { user: { select: { role: true } } }
+        });
+        
+        if (!pharmacist || pharmacist.user.role !== Role.PHARMACIST) {
+            return res.status(403).json({ message: 'Only pharmacists can approve refills' });
+        }
+        
+        const prescription = await prisma.prescription.findUnique({
+            where: { id: prescriptionId }
+        });
+        
+        if (!prescription) {
+            return res.status(404).json({ message: 'Prescription not found' });
+        }
+        
+        if (prescription.status !== 'REFILL_REQUESTED') {
+            return res.status(400).json({ 
+                message: `Prescription is not in refill requested status. Current status: ${prescription.status}` 
+            });
+        }
+        
+        // Update prescription back to dispensed status (ready for dispensing)
+        const updatedPrescription = await prisma.prescription.update({
+            where: { id: prescriptionId },
+            data: { 
+                status: 'DISPENSED',
+                refills: prescription.refills // Refills already decremented when requested
+            }
+        });
+        
+        // Delete the refill request
+        await prisma.refillRequest.deleteMany({
+            where: { prescriptionId }
+        });
+        
+        // Notify patient
+        const patient = await prisma.patient.findUnique({
+            where: { id: prescription.patientId }
+        });
+        
+        if (patient && patient.userId) {
+            await createNotification(
+                patient.userId,
+                `Your refill request for ${prescription.medicationName} has been approved and is ready for pickup`,
+                'MEDIUM',
+                'IN_APP'
+            );
+        }
+        
+        res.json({ message: 'Refill approved successfully', prescription: updatedPrescription });
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to approve refill' });
+    }
+};
+
+// Deny refill request (pharmacist)
+export const denyRefill = async (req: AuthRequest, res: Response) => {
+    try {
+        const prescriptionId = req.params.prescriptionId as string;
+        const pharmacist = await prisma.staff.findUnique({ 
+            where: { userId: req.user!.id },
+            include: { user: { select: { role: true } } }
+        });
+        
+        if (!pharmacist || pharmacist.user.role !== Role.PHARMACIST) {
+            return res.status(403).json({ message: 'Only pharmacists can deny refills' });
+        }
+        
+        const prescription = await prisma.prescription.findUnique({
+            where: { id: prescriptionId }
+        });
+        
+        if (!prescription) {
+            return res.status(404).json({ message: 'Prescription not found' });
+        }
+        
+        if (prescription.status !== 'REFILL_REQUESTED') {
+            return res.status(400).json({ 
+                message: `Prescription is not in refill requested status. Current status: ${prescription.status}` 
+            });
+        }
+        
+        // Update prescription back to dispensed status (ready for dispensing)
+        const updatedPrescription = await prisma.prescription.update({
+            where: { id: prescriptionId },
+            data: { 
+                status: 'DISPENSED',
+                refills: prescription.refills + 1 // Return the refill that was deducted
+            }
+        });
+        
+        // Delete the refill request
+        await prisma.refillRequest.deleteMany({
+            where: { prescriptionId }
+        });
+        
+        // Notify patient
+        const patient = await prisma.patient.findUnique({
+            where: { id: prescription.patientId }
+        });
+        
+        if (patient && patient.userId) {
+            await createNotification(
+                patient.userId,
+                `Your refill request for ${prescription.medicationName} has been denied. Please contact your doctor for a new prescription.`,
+                'MEDIUM',
+                'IN_APP'
+            );
+        }
+        
+        res.json({ message: 'Refill denied successfully', prescription: updatedPrescription });
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to deny refill' });
     }
 };
 
@@ -310,6 +433,84 @@ export const verifyInsurance = async (req: AuthRequest, res: Response) => {
         res.json(policy);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to verify insurance' });
+    }
+};
+
+// Update insurance policy (patient can edit their own, only if PENDING status)
+export const updateInsurancePolicy = async (req: AuthRequest, res: Response) => {
+    try {
+        const patient = await getPatientContext(req.user!.id);
+        const insuranceId = req.params.id as string;
+        const { provider, policyNumber, planName, groupNumber, coveragePercentage, validFrom, validUntil, coverageDetails } = req.body;
+
+        if (!insuranceId) {
+            return res.status(400).json({ message: 'Insurance ID is required' });
+        }
+
+        // Verify the policy belongs to this patient
+        const existing = await prisma.patientInsurance.findUnique({ where: { id: insuranceId } });
+        if (!existing) return res.status(404).json({ message: 'Insurance policy not found' });
+        if (existing.patientId !== patient.id) return res.status(403).json({ message: 'Unauthorized' });
+
+        // Patients can only edit PENDING or REJECTED policies (not ACTIVE — that requires admin re-verification)
+        if (existing.status === 'ACTIVE' || existing.status === 'VERIFIED') {
+            return res.status(400).json({ message: 'Cannot edit an active/verified policy. Contact support to update.' });
+        }
+
+        const updated = await prisma.patientInsurance.update({
+            where: { id: insuranceId },
+            data: {
+                ...(provider && { provider }),
+                ...(policyNumber && { policyNumber }),
+                ...(planName !== undefined && { planName }),
+                ...(groupNumber !== undefined && { groupNumber }),
+                ...(coveragePercentage !== undefined && { coveragePercentage: parseFloat(String(coveragePercentage)) }),
+                ...(validFrom && { validFrom: new Date(validFrom) }),
+                ...(validUntil && { validUntil: new Date(validUntil) }),
+                ...(coverageDetails !== undefined && { coverageDetails }),
+                // Reset to PENDING if was rejected — patient resubmitted
+                ...(existing.status === 'REJECTED' && { status: 'PENDING', verificationNote: null, verifiedBy: null, verifiedAt: null })
+            }
+        });
+
+        res.json(updated);
+    } catch (error: any) {
+        console.error('Update Insurance Error:', error);
+        res.status(500).json({ message: error.message || 'Failed to update insurance policy' });
+    }
+};
+
+// Delete insurance policy (patient can delete their own if PENDING or REJECTED)
+export const deleteInsurancePolicy = async (req: AuthRequest, res: Response) => {
+    try {
+        const patient = await getPatientContext(req.user!.id);
+        const insuranceId = req.params.id as string;
+
+        if (!insuranceId) {
+            return res.status(400).json({ message: 'Insurance ID is required' });
+        }
+
+        // Verify the policy belongs to this patient
+        const existing = await prisma.patientInsurance.findUnique({ where: { id: insuranceId } });
+        if (!existing) return res.status(404).json({ message: 'Insurance policy not found' });
+        if (existing.patientId !== patient.id) return res.status(403).json({ message: 'Unauthorized' });
+
+        // Don't allow deleting active policies with claims
+        if (existing.status === 'ACTIVE' || existing.status === 'VERIFIED') {
+            const activeClaims = await prisma.insuranceClaim.count({
+                where: { patientInsuranceId: insuranceId, status: { notIn: ['PAID', 'REJECTED'] } }
+            });
+            if (activeClaims > 0) {
+                return res.status(400).json({ message: 'Cannot delete policy with active claims. Contact support.' });
+            }
+        }
+
+        await prisma.patientInsurance.delete({ where: { id: insuranceId } });
+
+        res.json({ message: 'Insurance policy deleted successfully' });
+    } catch (error: any) {
+        console.error('Delete Insurance Error:', error);
+        res.status(500).json({ message: error.message || 'Failed to delete insurance policy' });
     }
 };
 
@@ -664,6 +865,54 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
         }
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to process payment' });
+    }
+};
+
+/**
+ * Patient submits payment details for confirmation (cash/bank transfer)
+ * Updates invoice with payment reference and sets AWAITING_CONFIRMATION status
+ */
+export const submitPayment = async (req: AuthRequest, res: Response) => {
+    try {
+        const patient = await getPatientContext(req.user!.id);
+        const { invoiceId, method, reference } = req.body;
+
+        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+        if (invoice.patientId !== patient.id) return res.status(403).json({ message: 'Unauthorized' });
+
+        const updatedInvoice = await prisma.invoice.update({
+            where: { id: invoiceId },
+            data: {
+                paymentMethod: method || 'BANK_TRANSFER',
+                paymentReference: reference || `PAY-${Date.now()}`,
+                paymentConfirmationStatus: 'AWAITING_CONFIRMATION'
+            }
+        });
+
+        // Notify finance/accountant staff
+        const staffUsers = await prisma.staff.findMany({
+            where: { user: { role: { in: ['ACCOUNTANT', 'ADMIN'] } } },
+            select: { userId: true }
+        });
+
+        const { createNotification } = require('./notification.controller');
+        const { sendToUser } = require('../services/notification.service');
+        
+        const notificationMessage = `Payment submitted by ${patient.firstName} ${patient.lastName} for invoice ${invoice.invoiceNumber}`;
+        for (const staff of staffUsers) {
+            await createNotification(staff.userId, notificationMessage, 'HIGH', 'IN_APP');
+            sendToUser(staff.userId, {
+                type: 'alert',
+                title: 'Payment Submitted',
+                message: notificationMessage,
+                data: { invoiceId: invoice.id, action: 'payment_submitted' }
+            });
+        }
+
+        res.json({ message: 'Payment submitted. Awaiting confirmation.', invoice: updatedInvoice });
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to submit payment' });
     }
 };
 

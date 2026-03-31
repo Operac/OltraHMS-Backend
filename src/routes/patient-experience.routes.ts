@@ -3,6 +3,8 @@ import {
     getInsurancePolicies, 
     addInsurancePolicy, 
     verifyInsurance,
+    updateInsurancePolicy,
+    deleteInsurancePolicy,
     getAllPatientInsurance,
     getMedicationAdherence, 
     logMedicationTaken, 
@@ -23,7 +25,8 @@ import {
     getQueueStatus,
     getEmergencyProfile,
     initializeVideoSession,
-    processPayment
+    processPayment,
+    submitPayment
 } from '../controllers/patient-experience.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
@@ -52,6 +55,8 @@ router.post('/feedback', submitFeedback);
 // Insurance
 router.get('/insurance', getInsurancePolicies);
 router.post('/insurance', addInsurancePolicy);
+router.patch('/insurance/:id', updateInsurancePolicy);
+router.delete('/insurance/:id', deleteInsurancePolicy);
 router.patch('/insurance/:insuranceId/verify', verifyInsurance);
 
 // Admin/Reception/Accountant routes for all patient insurance
@@ -83,5 +88,6 @@ router.post('/telemedicine/session', initializeVideoSession);
 
 // Payments
 router.post('/payments/process', processPayment);
+router.post('/payments/submit', submitPayment);
 
 export default router;

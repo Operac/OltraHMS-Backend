@@ -5,7 +5,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import authRoutes from './routes/auth.routes';
+import helmet from 'helmet';
+import { apiLimiter, authLimiter } from './middleware/rateLimiter.middleware';
+import { authenticate } from './middleware/auth.middleware';
 import patientRoutes from './routes/patient.routes';
 import appointmentRoutes from './routes/appointment.routes';
 import medicalRecordRoutes from './routes/medical-record.routes';
@@ -18,6 +20,7 @@ import billingRoutes from './routes/billing.routes';
 import doctorRoutes from './routes/doctor.routes';
 import receptionistRoutes from './routes/receptionist.routes';
 import publicRoutes from './routes/public.routes';
+import authRoutes from './routes/auth.routes';
 
 import { setupSocketHandlers } from './socket/socket.handler';
 import { sessionMiddleware, startSessionCleanup } from './middleware/session.middleware';
@@ -44,8 +47,24 @@ import wellnessRoutes from './routes/wellness.routes';
 import patientExperienceRoutes from './routes/patient-experience.routes';
 import queueRoutes from './routes/queue.routes';
 import displayRoutes from './routes/display.routes';
+import triageRoutes from './routes/triage.routes';
+import insuranceClaimRoutes from './routes/insurance-claim.routes';
+import insuranceRoutes from './routes/insurance.routes';
 
 const app = express();
+
+// Compute allowed origins once for both CORS and Socket.io
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const allowedOrigins = isDevelopment
+    ? [
+        process.env.FRONTEND_URL || "http://localhost:5173",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:5174"
+      ]
+    : process.env.FRONTEND_URL
+    ? [process.env.FRONTEND_URL, "https://oltra-hms-frontend.vercel.app"]
+    : ["https://oltra-hms-frontend.vercel.app"];
 
 // HTTPS redirect for production (must be after app is created)
 if (process.env.NODE_ENV === 'production') {
@@ -63,14 +82,7 @@ const httpServer = createServer(app);
 // Socket.io Setup
 const io: any = new Server(httpServer, {
     cors: {
-        origin: [
-            process.env.FRONTEND_URL || "http://localhost:5173", 
-            "http://localhost:5173", 
-            "http://localhost:3000",
-            "http://localhost:5174",
-            "https://oltra-hms-frontend.vercel.app",
-            "https://oltrahms-backend.onrender.com"
-        ],
+        origin: allowedOrigins,
         methods: ["GET", "POST"],
         credentials: true
     }
@@ -80,21 +92,23 @@ setupSocketHandlers(io);
 
 const PORT = process.env.PORT || 3000;
 
-import helmet from 'helmet';
-
 // Configure Helmet with explicit security headers
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'"],
-            imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'"],
-            fontSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
+            imgSrc: ["'self'", "data:", "https:", "blob:"],
+            connectSrc: ["'self'", "https:", "wss:"],
+            fontSrc: ["'self'", "https:", "data:"],
             objectSrc: ["'none'"],
-            mediaSrc: ["'self'"],
+            mediaSrc: ["'self'", "https:"],
             frameSrc: ["'none'"],
+            baseUri: ["'self'"],
+            formAction: ["'self'"],
+            frameAncestors: ["'none'"],
+            upgradeInsecureRequests: [],
         },
     },
     hsts: {
@@ -102,24 +116,14 @@ app.use(helmet({
         includeSubDomains: true,
         preload: true,
     },
-    xssFilter: true,
+    dnsPrefetchControl: { allow: false },
+    hidePoweredBy: true,
+    ieNoOpen: true,
     noSniff: true,
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    xssFilter: true,
     permittedCrossDomainPolicies: { permittedPolicies: "none" },
 }));
-
-// CORS configuration - only allow localhost in development
-const isDevelopment = process.env.NODE_ENV !== 'production';
-const allowedOrigins = isDevelopment
-    ? [
-        process.env.FRONTEND_URL || "http://localhost:5173", 
-        "http://localhost:5173", 
-        "http://localhost:3000",
-        "http://localhost:5174"
-      ]
-    : process.env.FRONTEND_URL
-      ? [process.env.FRONTEND_URL, "https://oltra-hms-frontend.vercel.app"]
-      : ["https://oltra-hms-frontend.vercel.app"];
 
 app.use(cors({
     origin: allowedOrigins,
@@ -127,10 +131,34 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Session middleware for timeout tracking
+// ============================================
+// PUBLIC ROUTES (No authentication required)
+// ============================================
+
+// Auth routes - have their own rate limiter
+app.use('/api/auth', authLimiter, authRoutes);
+
+// Public routes - general rate limiting only
+app.use('/api/public', apiLimiter, publicRoutes);
+
+app.get('/', (req, res) => {
+  res.send('OltraHMS Backend is running');
+});
+
+// ============================================
+// PROTECTED ROUTES (Authentication required)
+// ============================================
+
+// Apply authentication globally for all routes below
+app.use(authenticate);
+
+// Apply session middleware only for authenticated requests
 app.use(sessionMiddleware);
 
-app.use('/api/auth', authRoutes);
+// Apply general API rate limiter to protected routes
+app.use(apiLimiter);
+
+// Protected API routes - all require authentication
 app.use('/api/patients', patientRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/appointments', appointmentRoutes);
@@ -141,7 +169,6 @@ app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/doctor', doctorRoutes);
 app.use('/api/receptionist', receptionistRoutes);
-app.use('/api/public', publicRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/pharmacy', pharmacyRoutes);
@@ -164,12 +191,24 @@ app.use('/api/wards', wardRoutes);
 app.use('/api/patient', patientExperienceRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/display', displayRoutes);
+app.use('/api/triage', triageRoutes);
+app.use('/api/insurance-claim', insuranceClaimRoutes);
+app.use('/api/insurance', insuranceRoutes);
 
-app.get('/', (req, res) => {
-  res.send('OltraHMS Backend is running');
+// ============================================
+// 404 NOT FOUND HANDLER
+// ============================================
+app.use((req, res) => {
+  res.status(404).json({ 
+    success: false, 
+    message: 'Endpoint not found',
+    path: req.path
+  });
 });
 
-// Global Error Handler for Express
+// ============================================
+// GLOBAL ERROR HANDLER
+// ============================================
 app.use((err: any, req: any, res: any, next: any) => {
     console.error('🔥 Global Error Caught:', err);
     
@@ -201,7 +240,9 @@ app.use((err: any, req: any, res: any, next: any) => {
     });
 });
 
-// Prevent Node process from crashing on unexpected errors (e.g. DB Drops)
+// ============================================
+// PREVENT UNHANDLED REJECTIONS & EXCEPTIONS
+// ============================================
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason);
 });
@@ -210,10 +251,41 @@ process.on('uncaughtException', (error) => {
     console.error('🚨 Uncaught Exception:', error);
 });
 
+// ============================================
+// GRACEFUL SHUTDOWN HANDLER
+// ============================================
+let isShuttingDown = false;
+
+const shutdownServer = () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    console.log('⏹️  Shutting down gracefully...');
+    
+    // Stop accepting new connections
+    httpServer.close(() => {
+        console.log('✅ HTTP server closed');
+        process.exit(0);
+    });
+    
+    // Force shutdown after 10 seconds
+    setTimeout(() => {
+        console.error('❌ Forced shutdown after 10 seconds');
+        process.exit(1);
+    }, 10000);
+};
+
+process.on('SIGTERM', shutdownServer);
+process.on('SIGINT', shutdownServer);
+
+// ============================================
+// START SERVER
+// ============================================
 // Socket.io connection managed by socket.handler.ts
 
 httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 // Start session cleanup

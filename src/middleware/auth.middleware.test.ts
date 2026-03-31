@@ -1,19 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Response, NextFunction } from 'express';
 
 // Mock jwt module before importing auth.middleware
 vi.mock('jsonwebtoken', () => ({
-  default: {
-    verify: vi.fn((token: string, secret: string, callback: Function) => {
-      // Default implementation - tests can override
-      if (token === 'invalid-token') {
-        callback(new Error('Invalid token'), null);
-      } else {
-        callback(null, { id: 'user-123', email: 'test@example.com', role: 'ADMIN' });
-      }
-    }),
-  },
-  verify: vi.fn(),
+  verify: vi.fn((token: string, secret: string) => {
+    // Return a promise that resolves with the decoded token (like real jwt.verify)
+    if (token === 'invalid-token') {
+      return Promise.reject(new Error('Invalid token'));
+    }
+    return Promise.resolve({ id: 'user-123', email: 'test@example.com', role: 'ADMIN' });
+  }),
 }));
 
 import { authenticate, authorize } from './auth.middleware';
@@ -26,6 +22,9 @@ describe('Auth Middleware', () => {
   let jsonMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    // Set JWT secret for testing
+    process.env.JWT_SECRET = 'test-secret';
+    
     jsonMock = vi.fn();
     mockResponse = {
       status: vi.fn().mockReturnValue({ json: jsonMock }),
@@ -33,33 +32,36 @@ describe('Auth Middleware', () => {
     mockNext = vi.fn();
     
     mockRequest = {
-      header: vi.fn(),
+      header: vi.fn().mockReturnValue(undefined), // Default to no token
       user: undefined,
     };
-    
-    vi.clearAllMocks();
+  });
+  
+  afterEach(() => {
+    // Clean up
+    delete process.env.JWT_SECRET;
   });
 
   describe('authenticate', () => {
-    it('should call next() with valid token', () => {
+    it('should call next() with valid token', async () => {
       // Arrange
       const mockToken = 'valid-token';
-      (mockRequest.header as ReturnType<typeof vi.fn>).mockReturnValue(`Bearer ${mockToken}`);
+      mockRequest.header = vi.fn().mockReturnValue(`Bearer ${mockToken}`);
 
       // Act
-      authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
+      await authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
 
       // Assert - next should be called with the user set
       expect(mockNext).toHaveBeenCalled();
       expect(mockRequest.user).toBeDefined();
     });
 
-    it('should return 401 without token', () => {
+    it('should return 401 without token', async () => {
       // Arrange
-      (mockRequest.header as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+      mockRequest.header = vi.fn().mockReturnValue(undefined);
 
       // Act
-      authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
+      await authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
 
       // Assert
       expect(mockResponse.status).toHaveBeenCalledWith(401);
@@ -67,12 +69,12 @@ describe('Auth Middleware', () => {
       expect(mockNext).not.toHaveBeenCalled();
     });
 
-    it('should return 401 with invalid token', () => {
+    it('should return 401 with invalid token', async () => {
       // Arrange
-      (mockRequest.header as ReturnType<typeof vi.fn>).mockReturnValue('Bearer invalid-token');
+      mockRequest.header = vi.fn().mockReturnValue('Bearer invalid-token');
 
       // Act
-      authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
+      await authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
 
       // Assert
       expect(mockResponse.status).toHaveBeenCalledWith(401);
@@ -80,12 +82,12 @@ describe('Auth Middleware', () => {
       expect(mockNext).not.toHaveBeenCalled();
     });
 
-    it('should handle token without Bearer prefix', () => {
+    it('should handle token without Bearer prefix', async () => {
       // Arrange - Token without Bearer prefix but still valid
-      (mockRequest.header as ReturnType<typeof vi.fn>).mockReturnValue('some-token');
+      mockRequest.header = vi.fn().mockReturnValue('some-token');
 
       // Act
-      authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
+      await authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);
 
       // Assert - token without Bearer still works
       expect(mockNext).toHaveBeenCalled();

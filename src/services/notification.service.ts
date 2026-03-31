@@ -241,6 +241,62 @@ export function broadcastNotification(notification: Omit<Notification, 'id' | 't
 }
 
 /**
+ * Send payment submission notification to finance staff
+ */
+export function notifyPaymentSubmission(data: {
+  serviceType: 'LAB' | 'PHARMACY' | 'APPOINTMENT';
+  patientName: string;
+  serviceName: string;
+  serviceId: string;
+}): void {
+  sendToRole('ACCOUNTANT', {
+    type: 'alert',
+    title: `Payment Submitted - ${data.serviceType}`,
+    message: `${data.patientName} submitted payment for ${data.serviceName}`,
+    data: { serviceType: data.serviceType, serviceId: data.serviceId, action: 'payment_submitted' }
+  });
+  sendToRole('ADMIN', {
+    type: 'alert',
+    title: `Payment Submitted - ${data.serviceType}`,
+    message: `${data.patientName} submitted payment for ${data.serviceName}`,
+    data: { serviceType: data.serviceType, serviceId: data.serviceId, action: 'payment_submitted' }
+  });
+}
+
+/**
+ * Send payment clearance notification to patient
+ */
+export function notifyPaymentCleared(userId: string, data: {
+  serviceType: 'LAB' | 'PHARMACY' | 'APPOINTMENT';
+  serviceName: string;
+  serviceId: string;
+}): void {
+  sendToUser(userId, {
+    type: 'alert',
+    title: 'Payment Cleared',
+    message: `Payment cleared for ${data.serviceName}. You may proceed.`,
+    data: { serviceType: data.serviceType, serviceId: data.serviceId, action: 'payment_cleared' }
+  });
+}
+
+/**
+ * Send payment waiver notification to patient
+ */
+export function notifyPaymentWaived(userId: string, data: {
+  serviceType: 'LAB' | 'PHARMACY' | 'APPOINTMENT';
+  serviceName: string;
+  serviceId: string;
+  reason: string;
+}): void {
+  sendToUser(userId, {
+    type: 'alert',
+    title: 'Payment Waived',
+    message: `Payment waived for ${data.serviceName}. Reason: ${data.reason}`,
+    data: { serviceType: data.serviceType, serviceId: data.serviceId, action: 'payment_waived' }
+  });
+}
+
+/**
  * Get connected users count
  */
 export function getConnectedUsersCount(): number {
