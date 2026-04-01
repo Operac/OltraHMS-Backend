@@ -54,6 +54,16 @@ OltraHMS is a comprehensive Hospital Management System designed to streamline he
 - **Refund Processing**: Full refund workflow with refund method selection.
 
 ---
+## Recent Fixes (April 2026)
+
+### TypeError Fixes
+- Fixed "A.result?.toLowerCase is not a function" errors in frontend filtering operations
+- Added String() conversions before toLowerCase() calls to handle null/undefined values
+- Affected files:
+  - `frontend/src/pages/doctor/MedicalRecords.tsx`
+  - `frontend/src/pages/finance/ServiceManagement.tsx`
+  - `frontend/src/pages/patient/Records.tsx`
+  - `frontend/src/pages/finance/InsuranceClaims.tsx`
 
 ## Technology Stack
 
