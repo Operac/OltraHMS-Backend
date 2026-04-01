@@ -54,9 +54,11 @@ OltraHMS is a comprehensive Hospital Management System designed to streamline he
 - **Refund Processing**: Full refund workflow with refund method selection.
 
 ---
+
 ## Recent Fixes (April 2026)
 
 ### TypeError Fixes
+
 - Fixed "A.result?.toLowerCase is not a function" errors in frontend filtering operations
 - Added String() conversions before toLowerCase() calls to handle null/undefined values
 - Affected files:
@@ -68,7 +70,9 @@ OltraHMS is a comprehensive Hospital Management System designed to streamline he
 ## Technology Stack
 
 | Layer | Technology |
+
 |-------|------------|
+
 | **Frontend** | React, TypeScript, Vite, Tailwind CSS, Axios, React Hook Form, Zod |
 | **Backend** | Node.js, Express, TypeScript, Prisma ORM, PostgreSQL |
 | **Real-time** | Socket.io (Chat, Notifications, Video Signaling) |
@@ -97,7 +101,6 @@ OltraHMS is a comprehensive Hospital Management System designed to streamline he
 
 ## Project Structure
 
-```
 OltraHMS/
 ├── backend/                 # Backend API server
 │   ├── src/
@@ -129,7 +132,6 @@ OltraHMS/
 │   └── API.md            # API reference
 │
 └── package.json           # Root workspace config
-```
 
 ---
 
@@ -195,7 +197,7 @@ Start the development server:
 
 ```bash
 npm run dev
-```
+
 The server will start on `http://localhost:3000` (or your specified PORT).
 
 ### 3. Frontend Setup
@@ -214,7 +216,7 @@ Start the development server:
 
 ```bash
 npm run dev
-```
+
 The application will be available at `http://localhost:5173`.
 
 ---
@@ -272,16 +274,18 @@ FRONTEND_URL=http://localhost:5173
 
 ### Frontend (.env)
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `VITE_API_URL` | Backend API URL (e.g., http://localhost:3000/api) | Yes |
-| `VITE_SOCKET_URL` | Socket.io connection URL | Yes |
+| Variable         | Description                                          | Required |
+|------------------|------------------------------------------------------|----------|
+| `VITE_API_URL`   | Backend API URL (e.g., `http://localhost:3000/api`)  | Yes      |
+| `VITE_SOCKET_URL`| Socket.io connection URL                             | Yes      |
 
 **Example `.env` file:**
+
 ```env
+
 VITE_API_URL=http://localhost:3000/api
 VITE_SOCKET_URL=http://localhost:3000
-```
+
 
 ---
 
@@ -340,7 +344,9 @@ Located in `backend/scripts/`:
 - `verify-inpatient-flow.ts` - Test inpatient workflow
 
 Run a script:
+
 ```bash
+
 cd backend
 npx tsx scripts/verify-admin-flow.ts
 ```
@@ -352,6 +358,7 @@ npx tsx scripts/verify-admin-flow.ts
 Full API documentation is available in [`docs/API.md`](docs/API.md).
 
 The API includes:
+
 - **100+ endpoints** across 33 categories
 - **JWT Authentication** with access and refresh tokens
 - **Role-based authorization** for all endpoints
@@ -360,6 +367,7 @@ The API includes:
 ### Queue & Display Management
 
 #### Queue Management
+
 - `GET /api/queue` - Get all queues
 - `GET /api/queue/doctor/:id` - Get doctor's queue
 - `POST /api/queue/checkin` - Check in patient with insurance validation
@@ -367,27 +375,28 @@ The API includes:
 - `GET /api/queue/insurance/validate/:patientId` - Validate patient insurance
 
 #### Display (for TV/LCD screens)
+
 - `GET /api/display` - All queue display
 - `GET /api/display/doctor/:id` - Single doctor display
 
 #### Insurance (HMO)
+
 - `PATCH /api/patient/insurance/:insuranceId/verify` - Manual verification (admin)
 
 ### HMO Verification Workflow
 
-```
 1. Patient adds insurance in profile
 2. Status: PENDING (default)
 3. Reception clicks "Verify" after phone confirmation
 4. Status: VERIFIED / REJECTED
 5. At check-in: system checks expiry + status
 6. Warnings shown but check-in always allowed
-```
 
 ### Key API Modules
 
 | Module | Description |
-|--------|-------------|
+
+|--------|------------- |
 | `/api/auth` | Authentication (login, register, 2FA, password reset, profile) |
 | `/api/patients` | Patient management, profiles, medication schedules |
 | `/api/appointments` | Appointment scheduling, rescheduling |
@@ -464,12 +473,13 @@ A reference schema is also available at [`schema.prisma.reference`](schema.prism
 ### Backend (Render/Railway/Heroku)
 
 1. Build the backend:
+
 ```bash
 cd backend
 npm run build
-```
 
 2. Set environment variables in your deployment platform:
+
    - `DATABASE_URL` - Production PostgreSQL connection
    - `JWT_SECRET` - Secure random string
    - `REFRESH_SECRET` - Secure random string
@@ -483,10 +493,10 @@ npm start
 ### Frontend (Vercel/Netlify)
 
 1. Build the frontend:
+
 ```bash
 cd frontend
 npm run build
-```
 
 2. The build output is in the `dist` folder.
 
