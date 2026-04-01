@@ -11,15 +11,11 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypt
 
 import { prisma } from '../lib/prisma';
 
-// Encryption key for 2FA secrets - must be a 32-byte hex string (64 chars)
-// Generate with: crypto.randomBytes(32).toString('hex')
 const getEncryptionKey = (): Buffer => {
     const secret = process.env.ENCRYPTION_SECRET;
     if (!secret) {
         throw new Error("ENCRYPTION_SECRET environment variable is required for 2FA");
     }
-    // If the secret is exactly 64 hex chars (32 bytes), use it directly
-    // Otherwise, hash it to get a consistent 32-byte key
     if (/^[a-f0-9]{64}$/i.test(secret)) {
         return Buffer.from(secret, 'hex');
     }
@@ -52,7 +48,7 @@ const registerSchema = z.object({
   lastName: z.string(),
   phone: z.string().optional(),
   gender: z.nativeEnum(Gender).optional(),
-  dateOfBirth: z.string().optional(), // Expecting ISO date string
+  dateOfBirth: z.string().optional(),
 });
 
 export const register = async (req: Request, res: Response) => {
@@ -77,14 +73,7 @@ export const register = async (req: Request, res: Response) => {
       },
     });
 
-    // Automatically create Patient profile if role is PATIENT
     if (user.role === Role.PATIENT) {
-        if (!req.body.phone || !req.body.gender || !req.body.dateOfBirth) {
-             // In a real app, we might want to fail the whole transaction or require these fields.
-             // For now, let's try to create it, but if missing, we might have incomplete data.
-             // Let's rely on the schema or check here.
-        }
-
         const patientNumber = `HMS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
         
         await prisma.patient.create({
@@ -92,26 +81,28 @@ export const register = async (req: Request, res: Response) => {
                 userId: user.id,
                 firstName: user.firstName || '',
                 lastName: user.lastName || '',
-                // email: user.email - Removed as not in Patient model
-                // Patient model in schema.prisma:
-                // id, userId, patientNumber, firstName, lastName, dateOfBirth, gender, phone, address...
-                // It does NOT have email directly, it relies on User.
-                // Wait, let me check schema again. 
-                // Line 235: model Patient { ... userId String @unique ... }
-                // It does NOT have email field in Patient model. OK.
-                
                 patientNumber,
-                dateOfBirth: new Date(req.body.dateOfBirth || new Date().toISOString()), // Fallback or throw? Zod checks?
+                dateOfBirth: new Date(req.body.dateOfBirth || new Date().toISOString()),
                 gender: req.body.gender as Gender || Gender.OTHER,
                 phone: req.body.phone || '000-000-0000',
             }
         });
     }
 
-    await sendWelcomeEmail(user.email, user.firstName || 'User');
-    await logAudit(user.id, 'USER_REGISTER', 'User registered successfully', req.ip || 'unknown');
+    // FIX: wrap email and audit in try/catch so they never kill registration
+    // if email service is down or misconfigured, user still gets their token
+    try {
+        await sendWelcomeEmail(user.email, user.firstName || 'User');
+    } catch (emailError) {
+        console.error('Welcome email failed (non-fatal):', emailError);
+    }
 
-    // Generate JWT and refresh tokens (similar to login function)
+    try {
+        await logAudit(user.id, 'USER_REGISTER', 'User registered successfully', req.ip || 'unknown');
+    } catch (auditError) {
+        console.error('Audit log failed (non-fatal):', auditError);
+    }
+
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) throw new Error("JWT_SECRET is not defined");
 
@@ -130,7 +121,6 @@ export const register = async (req: Request, res: Response) => {
         { expiresIn: '7d' }
     );
 
-    // Fetch Staff ID if applicable (though for registration it will always be PATIENT, keeping for consistency)
     const staff = await prisma.staff.findUnique({ where: { userId: user.id } });
 
     res.status(201).json({ 
@@ -146,6 +136,7 @@ export const register = async (req: Request, res: Response) => {
       } 
     });
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({ message: 'Registration failed' });
   }
 };
@@ -154,7 +145,6 @@ export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
     
-    // Hardened check to prevent Prisma crashing with 500 if inputs are malformed
     if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
         return res.status(400).json({ message: 'Email and password are required' });
     }
@@ -176,7 +166,7 @@ export const login = async (req: Request, res: Response) => {
         let lockoutUntil = user.lockoutUntil;
         
         if (attempts >= 5) {
-            lockoutUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+            lockoutUntil = new Date(Date.now() + 15 * 60 * 1000);
         }
 
         await prisma.user.update({
@@ -187,7 +177,6 @@ export const login = async (req: Request, res: Response) => {
         return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Reset lockout on success
     await prisma.user.update({
         where: { id: user.id },
         data: { failedLoginAttempts: 0, lockoutUntil: null, lastLogin: new Date() }
@@ -211,11 +200,12 @@ export const login = async (req: Request, res: Response) => {
         { expiresIn: '7d' }
     );
 
-    // Store refresh token logic here if needed
+    try {
+        await logAudit(user.id, 'USER_LOGIN', 'Login successful', req.ip || 'unknown');
+    } catch (auditError) {
+        console.error('Audit log failed (non-fatal):', auditError);
+    }
 
-    await logAudit(user.id, 'USER_LOGIN', 'Login successful', req.ip || 'unknown');
-
-    // Fetch Staff ID if applicable
     const staff = await prisma.staff.findUnique({ where: { userId: user.id } });
 
     res.json({ 
@@ -228,7 +218,6 @@ export const login = async (req: Request, res: Response) => {
             firstName: user.firstName,
             lastName: user.lastName,
             staffId: staff?.id 
-
         } 
     });
   } catch (error) {
@@ -249,14 +238,12 @@ export const resetPasswordRequest = async (req: Request, res: Response) => {
         if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not defined");
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
         
-        // Store reset token with IP address for validation
         const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
         await prisma.user.update({
             where: { id: user.id },
             data: { 
                 resetToken: token, 
                 resetTokenExpiry: new Date(Date.now() + 3600000),
-                // Store IP for validation (in production, consider encrypting this)
                 lastResetIp: clientIp
             }
         });
@@ -276,16 +263,14 @@ export const resetPasswordConfirm = async (req: Request, res: Response) => {
             return res.status(400).json({ message: 'Token and new password are required' });
         }
 
-        // Validate password strength
         if (newPassword.length < 8) {
             return res.status(400).json({ message: 'Password must be at least 8 characters' });
         }
 
-        // Find user with this token
         const user = await prisma.user.findFirst({
             where: {
                 resetToken: token,
-                resetTokenExpiry: { gt: new Date() } // Token not expired
+                resetTokenExpiry: { gt: new Date() }
             }
         });
 
@@ -293,28 +278,22 @@ export const resetPasswordConfirm = async (req: Request, res: Response) => {
             return res.status(400).json({ message: 'Invalid or expired reset token' });
         }
 
-        // Validate IP address (optional security measure)
-        // Only enforce if the user previously had an IP recorded
         if (user.lastResetIp) {
             const currentIp = req.ip || req.socket.remoteAddress || 'unknown';
-            // For now, we log IP mismatch but don't block (to handle proxy/load balancer issues)
-            // In production, you might want to be stricter
             if (currentIp !== user.lastResetIp) {
                 console.warn(`Password reset IP mismatch: stored=${user.lastResetIp}, current=${currentIp}`);
             }
         }
 
-        // Hash new password
         const passwordHash = await bcrypt.hash(newPassword, 12);
 
-        // Update password and clear reset token
         await prisma.user.update({
             where: { id: user.id },
             data: {
                 passwordHash,
                 resetToken: null,
                 resetTokenExpiry: null,
-                lastResetIp: null // Clear the stored IP after use
+                lastResetIp: null
             }
         });
 
@@ -324,8 +303,6 @@ export const resetPasswordConfirm = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error resetting password' });
     }
 }
-
-// ==================== TWO FACTOR AUTHENTICATION ====================
 
 export const setupTwoFactor = async (req: AuthRequest, res: Response) => {
     try {
@@ -343,11 +320,9 @@ export const setupTwoFactor = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: '2FA is already enabled' });
         }
 
-        // Generate secret
         const secret = generateTwoFactorSecret();
         const qrUrl = generateTwoFactorQRUrl(user.email, secret);
 
-        // Store secret temporarily encrypted (not enabled yet)
         const encryptedSecret = encryptSecret(secret);
         await prisma.user.update({
             where: { id: userId },
@@ -383,22 +358,16 @@ export const enableTwoFactor = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'Please setup 2FA first' });
         }
 
-        // Decrypt the secret for verification
         const decryptedSecret = decryptSecret(user.twoFactorSecret);
         
-        // Verify the code
         const isValid = verifyTwoFactorCode(decryptedSecret, code);
         if (!isValid) {
             return res.status(400).json({ message: 'Invalid verification code' });
         }
 
-        // Generate backup codes
         const backupCodes = generateBackupCodes(10);
-
-        // Encrypt the secret before storing
         const encryptedSecret = encryptSecret(user.twoFactorSecret);
 
-        // Enable 2FA and store backup codes
         await prisma.user.update({
             where: { id: userId },
             data: {
@@ -432,18 +401,15 @@ export const disableTwoFactor = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: '2FA is not enabled' });
         }
 
-        // Verify password
         const isValidPassword = await bcrypt.compare(password || '', user.passwordHash);
         if (!isValidPassword) {
             return res.status(401).json({ message: 'Invalid password' });
         }
 
-        // Verify 2FA code or backup code
         const storedCodes = user.twoFactorBackupCodes 
             ? JSON.parse(user.twoFactorBackupCodes) 
             : [];
         
-        // Decrypt secret for verification
         const decryptedSecret = user.twoFactorSecret ? decryptSecret(user.twoFactorSecret) : '';
         
         const isValidCode = verifyTwoFactorCode(decryptedSecret, code);
@@ -453,7 +419,6 @@ export const disableTwoFactor = async (req: AuthRequest, res: Response) => {
             return res.status(401).json({ message: 'Invalid verification code' });
         }
 
-        // Disable 2FA
         await prisma.user.update({
             where: { id: userId },
             data: {
@@ -483,9 +448,7 @@ export const verifyTwoFactor = async (req: Request, res: Response) => {
             return res.status(400).json({ message: '2FA is not enabled' });
         }
 
-        // Try regular TOTP code first
         if (!isBackupCode) {
-            // Decrypt the secret first
             const decryptedSecret = user.twoFactorSecret ? decryptSecret(user.twoFactorSecret) : '';
             const isValid = verifyTwoFactorCode(decryptedSecret, code);
             if (isValid) {
@@ -493,7 +456,6 @@ export const verifyTwoFactor = async (req: Request, res: Response) => {
             }
         }
 
-        // Try backup code
         const storedCodes = user.twoFactorBackupCodes 
             ? JSON.parse(user.twoFactorBackupCodes) 
             : [];
@@ -501,7 +463,6 @@ export const verifyTwoFactor = async (req: Request, res: Response) => {
         const backupResult = verifyBackupCode(code, storedCodes);
 
         if (backupResult.valid) {
-            // Update remaining backup codes
             await prisma.user.update({
                 where: { id: userId },
                 data: { 
@@ -522,7 +483,7 @@ const updateProfileSchema = z.object({
   firstName: z.string().min(2).optional(),
   lastName: z.string().min(2).optional(),
   email: z.string().email().optional(),
-  phone: z.string().optional(), // If we add phone to User model or map to Patient/Staff
+  phone: z.string().optional(),
 });
 
 export const updateProfile = async (req: AuthRequest, res: Response) => {
@@ -532,7 +493,6 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
 
         const data = updateProfileSchema.parse(req.body);
 
-        // Check email uniqueness if email is being updated
         if (data.email) {
             const existing = await prisma.user.findUnique({ where: { email: data.email } });
             if (existing && existing.id !== userId) {
@@ -546,13 +506,8 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
                 firstName: data.firstName,
                 lastName: data.lastName,
                 email: data.email,
-                // phone // User model doesn't have phone, check Patient/Staff if needed.
-                // For MVP, assuming User model only has basic details. 
             }
         });
-
-        // If user is Patient, maybe update Patient phone?
-        // Not implemented here to keep simple.
 
         res.json({
             message: 'Profile updated successfully',
@@ -572,8 +527,6 @@ export const updateProfile = async (req: AuthRequest, res: Response) => {
     }
 };
 
-// ==================== CHANGE PASSWORD ====================
-
 export const changePassword = async (req: AuthRequest, res: Response) => {
     try {
         const userId = req.user?.id;
@@ -589,7 +542,6 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'Password must be at least 8 characters' });
         }
 
-        // Get user with password hash
         const user = await prisma.user.findUnique({
             where: { id: userId }
         });
@@ -598,16 +550,13 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Verify current password
         const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash);
         if (!isValidPassword) {
             return res.status(400).json({ message: 'Current password is incorrect' });
         }
 
-        // Hash new password
         const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
-        // Update password
         await prisma.user.update({
             where: { id: userId },
             data: { passwordHash: newPasswordHash }

@@ -9,21 +9,31 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// FIX: verify transporter config on startup so you catch misconfig immediately
+transporter.verify((error) => {
+  if (error) {
+    console.error('❌ Email transporter config error:', error);
+  } else {
+    console.log('✅ Email transporter ready');
+  }
+});
+
 export const sendEmail = async (to: string, subject: string, html: string) => {
   try {
     await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+      from: `"OltraHMS" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html,
     });
-    console.log(`Email sent to ${to}`);
+    console.log(`✅ Email sent to ${to}`);
   } catch (error) {
-    console.error('Error sending email:', error);
-    // Don't throw logic error for email failure, just log it
+    // FIX: log the actual error so you can see it in Render logs
+    console.error(`❌ Email failed to ${to}:`, error);
   }
 };
 
+// everything else below stays exactly the same
 export const sendWelcomeEmail = async (email: string, name: string) => {
   const subject = 'Welcome to OltraHMS';
   const safeName = escape(name);
@@ -35,9 +45,6 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send login credentials email (for new patients/staff)
- */
 export const sendCredentialsEmail = async (
   email: string,
   name: string,
@@ -87,9 +94,6 @@ export const sendPasswordResetEmail = async (email: string, token: string) => {
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send appointment confirmation email
- */
 export const sendAppointmentConfirmationEmail = async (
   email: string,
   patientName: string,
@@ -99,7 +103,6 @@ export const sendAppointmentConfirmationEmail = async (
   type: string
 ) => {
   const subject = 'Appointment Confirmation - OltraHMS';
-  // Sanitize all user inputs to prevent XSS
   const safePatientName = escape(patientName);
   const safeDoctorName = escape(doctorName);
   const safeDate = escape(appointmentDate);
@@ -122,9 +125,6 @@ export const sendAppointmentConfirmationEmail = async (
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send appointment reminder email
- */
 export const sendAppointmentReminderEmail = async (
   email: string,
   patientName: string,
@@ -148,9 +148,6 @@ export const sendAppointmentReminderEmail = async (
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send appointment cancellation email
- */
 export const sendAppointmentCancellationEmail = async (
   email: string,
   patientName: string,
@@ -172,9 +169,6 @@ export const sendAppointmentCancellationEmail = async (
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send prescription ready email
- */
 export const sendPrescriptionReadyEmail = async (
   email: string,
   patientName: string,
@@ -194,9 +188,6 @@ export const sendPrescriptionReadyEmail = async (
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send lab results ready email
- */
 export const sendLabResultsEmail = async (
   email: string,
   patientName: string,
@@ -213,9 +204,6 @@ export const sendLabResultsEmail = async (
   await sendEmail(email, subject, html);
 };
 
-/**
- * Send low stock alert to pharmacists
- */
 export const sendLowStockAlertEmail = async (
   email: string,
   medications: { name: string; currentStock: number; reorderLevel: number }[]
