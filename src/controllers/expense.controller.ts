@@ -1,17 +1,31 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { z } from 'zod';
+
+const expenseSchema = z.object({
+    description: z.string().min(1).max(500).trim(),
+    amount: z.number().positive('Amount must be positive'),
+    category: z.enum(['SUPPLIES', 'MAINTENANCE', 'SALARY', 'UTILITIES', 'EQUIPMENT', 'OTHER']),
+    incurredAt: z.string().datetime({ offset: true }).optional(),
+});
 
 // Create Expense
 export const addExpense = async (req: Request, res: Response) => {
     try {
-        const { description, amount, category, incurredAt } = req.body;
-        // Assume User is attached to req by middleware
-        const userId = (req as any).user?.id; 
+        const parsed = expenseSchema.safeParse({
+            ...req.body,
+            amount: Number(req.body.amount),
+        });
+        if (!parsed.success) {
+            return res.status(400).json({ message: 'Validation error', errors: parsed.error.flatten().fieldErrors });
+        }
+        const { description, amount, category, incurredAt } = parsed.data;
+        const userId = (req as any).user?.id;
 
         const expense = await prisma.expense.create({
             data: {
                 description,
-                amount: Number(amount),
+                amount,
                 category,
                 incurredAt: incurredAt ? new Date(incurredAt) : new Date(),
                 recordedBy: { connect: { id: userId } }

@@ -1,6 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Response } from 'express';
 
+// auth.middleware uses a default import of jsonwebtoken, so the mock must expose
+// `verify` on both the default and named export. Created via vi.hoisted so it
+// exists before the hoisted vi.mock factory runs.
+const { verifyMock } = vi.hoisted(() => ({
+  verifyMock: vi.fn((token: string, secret: string) => {
+    if (token === 'valid-token' && secret === 'test-secret') {
+      return Promise.resolve({ id: 'user-123', email: 'test@example.com', role: 'ADMIN' });
+    }
+    return Promise.reject(new Error('Invalid token'));
+  }),
+}));
+
+vi.mock('jsonwebtoken', () => ({
+  default: { verify: verifyMock },
+  verify: verifyMock,
+}));
+
 // Mock the auth.middleware directly
 vi.mock('../lib/prisma', () => ({
   prisma: {
@@ -46,16 +63,7 @@ describe('Auth Middleware Simple Test', () => {
     // Arrange
     const mockToken = 'valid-token';
     mockRequest.header = vi.fn().mockReturnValue(`Bearer ${mockToken}`);
-
-    // Mock jwt.verify to return a decoded token
-    vi.mocked('jsonwebtoken').verify.mockImplementation(
-      (token: string, secret: string) => {
-        if (token === 'valid-token' && secret === 'test-secret') {
-          return Promise.resolve({ id: 'user-123', email: 'test@example.com', role: 'ADMIN' });
-        }
-        return Promise.reject(new Error('Invalid token'));
-      }
-    );
+    // jwt.verify is mocked at module scope (see top of file) to resolve for 'valid-token'.
 
     // Act
     await authenticate(mockRequest as AuthRequest, mockResponse as Response, mockNext);

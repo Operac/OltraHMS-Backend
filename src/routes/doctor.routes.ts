@@ -1,13 +1,58 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth.middleware';
 import { getDoctorDashboardStats } from '../controllers/doctor.controller';
+import { getDiagnosisSuggestions } from '../services/ai.service';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // GET /api/doctor/dashboard/stats - Get doctor's dashboard stats
 router.get('/dashboard/stats', authenticate, getDoctorDashboardStats);
+
+// GET /api/doctor/ai-status - Check if AI is available
+router.get('/ai-status', authenticate, (_req: Request, res: Response) => {
+    res.json({ available: !!process.env.MISTRAL_API_KEY });
+});
+
+// POST /api/doctor/ai-suggestions - Get real-time AI clinical suggestions
+router.post('/ai-suggestions', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { patientId, soap, vitals, history } = req.body;
+        const patient = patientId ? await prisma.patient.findUnique({
+            where: { id: patientId },
+            select: { dateOfBirth: true, gender: true, allergies: true, chronicConditions: true }
+        }) : null;
+
+        const age = patient?.dateOfBirth
+            ? Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+            : undefined;
+
+        const suggestions = await getDiagnosisSuggestions({
+            age,
+            gender: patient?.gender,
+            allergies: (patient?.allergies as string[]) || [],
+            chronicConditions: (patient?.chronicConditions as string[]) || [],
+            chiefComplaint: soap?.subjective,
+            subjective: soap?.subjective,
+            objective: soap?.objective,
+            vitals: vitals ? {
+                bpSystolic: vitals.bpSystolic ? Number(vitals.bpSystolic) : undefined,
+                bpDiastolic: vitals.bpDiastolic ? Number(vitals.bpDiastolic) : undefined,
+                heartRate: vitals.heartRate ? Number(vitals.heartRate) : undefined,
+                temperature: vitals.temperature ? Number(vitals.temperature) : undefined,
+                oxygenSaturation: vitals.oxygenSaturation ? Number(vitals.oxygenSaturation) : undefined,
+            } : undefined,
+        });
+
+        if (!suggestions) {
+            return res.status(503).json({ message: 'AI service not available' });
+        }
+        res.json(suggestions);
+    } catch (error) {
+        console.error('AI suggestions error:', error);
+        res.status(500).json({ message: 'Failed to get AI suggestions' });
+    }
+});
 
 // PUT /api/doctor/telemedicine - Update doctor's telemedicine availability
 router.put('/telemedicine', authenticate, async (req: Request, res: Response) => {

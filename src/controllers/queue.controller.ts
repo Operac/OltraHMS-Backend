@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { runSerializable } from '../lib/dbRetry';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { InsuranceStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -208,21 +209,24 @@ export const checkInPatient = async (req: AuthRequest, res: Response) => {
 
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-        const maxQueue = await prisma.appointment.aggregate({
-            where: { doctorId: appointment.doctorId, appointmentDate: { gte: today, lt: tomorrow }, queuePosition: { not: null } },
-            _max: { queuePosition: true }
+
+        // Compute the next queue number and apply it atomically so two concurrent
+        // check-ins for the same doctor cannot be assigned the same position.
+        const updated = await runSerializable(async (tx) => {
+            const maxQueue = await tx.appointment.aggregate({
+                where: { doctorId: appointment.doctorId, appointmentDate: { gte: today, lt: tomorrow }, queuePosition: { not: null } },
+                _max: { queuePosition: true }
+            });
+            const queuePosition = priority === 'emergency' ? 1 : ((maxQueue._max.queuePosition || 0) + 1);
+            const estimatedWait = queuePosition * 15;
+            return tx.appointment.update({
+                where: { id: appointmentId },
+                data: { status: 'CHECKED_IN', queuePosition, estimatedWaitTime: estimatedWait },
+                include: { patient: { select: { id: true, firstName: true, lastName: true, patientNumber: true } } }
+            });
         });
 
-        const queuePosition = priority === 'emergency' ? 1 : ((maxQueue._max.queuePosition || 0) + 1);
-        const estimatedWait = queuePosition * 15;
-
-        const updated = await prisma.appointment.update({
-            where: { id: appointmentId },
-            data: { status: 'CHECKED_IN', queuePosition, estimatedWaitTime: estimatedWait },
-            include: { patient: { select: { id: true, firstName: true, lastName: true, patientNumber: true } } }
-        });
-
-        res.json({ message: 'Checked in', appointment: updated, queuePosition, estimatedWaitTime: estimatedWait });
+        res.json({ message: 'Checked in', appointment: updated, queuePosition: updated.queuePosition, estimatedWaitTime: updated.estimatedWaitTime });
         
         // Emit socket event for real-time update
         notifyPatientCheckedIn(appointmentId).catch(console.error);
@@ -302,29 +306,31 @@ export const addWalkIn = async (req: AuthRequest, res: Response) => {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
 
-        const maxQueue = await prisma.appointment.aggregate({
-            where: { doctorId, appointmentDate: { gte: today, lt: tomorrow }, queuePosition: { not: null } },
-            _max: { queuePosition: true }
+        // Compute the next queue number and create the walk-in atomically so two
+        // concurrent walk-ins for the same doctor cannot share a queue position.
+        const appointment = await runSerializable(async (tx) => {
+            const maxQueue = await tx.appointment.aggregate({
+                where: { doctorId, appointmentDate: { gte: today, lt: tomorrow }, queuePosition: { not: null } },
+                _max: { queuePosition: true }
+            });
+            const queuePosition = priority === 'emergency' ? 1 : ((maxQueue._max.queuePosition || 0) + 1);
+            const estimatedWait = queuePosition * 15;
+            return tx.appointment.create({
+                data: {
+                    patientId: patient.id, doctorId,
+                    appointmentDate: today,
+                    startTime: new Date(),
+                    endTime: new Date(Date.now() + 30 * 60000),
+                    type: priority === 'emergency' ? 'EMERGENCY' : 'FIRST_VISIT', status: 'CHECKED_IN', reason: reason || 'Walk-in',
+                    queuePosition, estimatedWaitTime: estimatedWait
+                },
+            });
         });
 
-        const queuePosition = priority === 'emergency' ? 1 : ((maxQueue._max.queuePosition || 0) + 1);
-        const estimatedWait = queuePosition * 15;
-
-        const appointment = await prisma.appointment.create({
-            data: {
-                patientId: patient.id, doctorId,
-                appointmentDate: today,
-                startTime: new Date(),
-                endTime: new Date(Date.now() + 30 * 60000),
-                type: priority === 'emergency' ? 'EMERGENCY' : 'FIRST_VISIT', status: 'CHECKED_IN', reason: reason || 'Walk-in',
-                queuePosition, estimatedWaitTime: estimatedWait
-            },
-        });
-
-        res.status(201).json({ 
-            message: 'Walk-in added', 
-            appointment, 
-            queuePosition,
+        res.status(201).json({
+            message: 'Walk-in added',
+            appointment,
+            queuePosition: appointment.queuePosition,
             patient: { id: patient.id, firstName: patient.firstName, lastName: patient.lastName, patientNumber: patient.patientNumber }
         });
     } catch (error) {

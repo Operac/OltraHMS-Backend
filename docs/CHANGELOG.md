@@ -33,6 +33,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `lastResetIp` field to User model for password reset security
 - Run `npx prisma generate` and `npx prisma db push` to apply changes
 
+## [1.2.0] - 2026-06-30
+
+### Added
+
+#### Authentication — Silent Token Refresh
+- New endpoint `POST /api/auth/refresh`: verifies the refresh token, re-fetches the user (so role changes and account lockouts take effect on refresh), issues a new 15-minute access token, and rotates the refresh token.
+- Frontend stores the refresh token at login and transparently refreshes the access token on a `401`, retrying the original request. Concurrent `401`s share a single in-flight refresh.
+- Files: `src/controllers/auth.controller.ts` (`refreshAccessToken`), `src/routes/auth.routes.ts`, `frontend/src/lib/api.ts` (`installAuthInterceptors`), `frontend/src/context/AuthContext.tsx`.
+
+#### Offline-First Capture (front desk)
+- Receptionist check-in/walk-in (`POST /api/queue/checkin`, `POST /api/queue/walkin`) and nurse triage + vitals (`POST /api/triage`) are now captured locally during connectivity/power outages and replayed automatically on reconnect.
+- New helper `submitWithOfflineFallback()` in `frontend/src/services/offlineStorage.ts`; replay handled by `syncAllPendingData()`.
+
+### Fixed
+
+#### Critical
+- **15-minute forced logout**: a refresh token was issued at login but never usable (no refresh endpoint, frontend never used it), so every session expired after 15 minutes. Now fully wired with silent refresh.
+- **Broken offline sync**: `syncAllPendingData()` replayed requests with a relative URL and no `Authorization` header, so every replay failed (404/401). It now uses the configured API base URL and a fresh auth token.
+
+#### Tests
+- Repaired the backend Vitest suite (previously 14 failing across 7 files): Jest→Vitest conversion, correct `jsonwebtoken` default-export mocks, real-otplib 2FA tests, dynamic future dates for appointment tests, and proper `google-spreadsheet`/`google-auth-library` mocks. **94 tests passing.** No application logic was changed to make tests pass — the failures were stale/incorrect tests.
+
+### Performance & Concurrency (scaling hardening)
+
+- **Single Prisma connection pool**: removed 5 duplicate `new PrismaClient()` instances (in `doctor.routes`, `settings.routes`, `audit.service`, `availability.service`, `patient.service`) that each opened their own pool; all now use the shared `src/lib/prisma.ts` client. Prevents connection exhaustion under load.
+- **Production query logging off**: Prisma now logs only `warn`/`error` in production (was logging every SQL query).
+- **Race conditions fixed** (check-then-act → atomic):
+  - Bed allocation claims the bed with a conditional `updateMany` (only if still vacant) — no more double-booked beds.
+  - Queue numbering (check-in + walk-in) and appointment slot booking now run inside serializable transactions with retry (`src/lib/dbRetry.ts`) — no more duplicate queue numbers or double-booked slots.
+- **Hospital-friendly rate limiting**: protected-route limiter is keyed per **authenticated user** instead of per IP (hospitals share one NAT IP); login limiter is keyed per **account/email**; a dedicated, generous `refreshLimiter` covers `POST /api/auth/refresh`.
+- **Defensive pagination**: `GET /api/appointments` is capped (default 500, max 1000) with optional `?page`/`?limit` to prevent unbounded result sets.
+
+> Note: server-side sessions and rate-limit counters are still **in-memory**, so the backend should run as a **single instance**. Running multiple instances requires moving both to a shared store (e.g. Redis).
+
 ## [1.1.0] - 2026-03-12
 
 ### Added

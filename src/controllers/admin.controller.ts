@@ -4,6 +4,30 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import bcrypt from 'bcryptjs';
 import { Role } from '@prisma/client';
 import { sendCredentialsEmail } from '../services/email.service';
+import crypto from 'crypto';
+import { z } from 'zod';
+
+const createStaffSchema = z.object({
+    firstName: z.string().min(1).max(100).trim(),
+    lastName: z.string().min(1).max(100).trim(),
+    email: z.string().email().toLowerCase(),
+    password: z.string().min(8).optional(),
+    role: z.enum(['DOCTOR', 'NURSE', 'RECEPTIONIST', 'PHARMACIST', 'LAB_TECH', 'ACCOUNTANT', 'INSURANCE_OFFICER', 'RADIOLOGIST', 'ADMIN']),
+    departmentId: z.string().uuid().optional().nullable(),
+    specialization: z.string().max(200).optional(),
+    baseSalary: z.number().positive().optional(),
+});
+
+const generateSecurePassword = (): string => {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghjkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const special = '!@#$%';
+    const all = upper + lower + digits + special;
+    const rand = (chars: string) => chars[crypto.randomInt(chars.length)];
+    const rest = Array.from({ length: 8 }, () => rand(all)).join('');
+    return rand(upper) + rand(lower) + rand(digits) + rand(special) + rest;
+};
 
 /**
  * Get System Statistics for Dashboard
@@ -88,15 +112,19 @@ export const getAllStaff = async (req: AuthRequest, res: Response) => {
  */
 export const createStaff = async (req: AuthRequest, res: Response) => {
     try {
-        const { firstName, lastName, email, password, role, departmentId, specialization } = req.body;
+        const parsed = createStaffSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ message: 'Validation error', errors: parsed.error.flatten().fieldErrors });
+        }
+        const { firstName, lastName, email, password, role, departmentId, specialization } = parsed.data;
 
         // Validation
         const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) return res.status(400).json({ message: 'Email already exists' });
 
-        // Use default password if not provided
-        const defaultPassword = password || 'Oltra123!';
-        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+        // Generate a cryptographically random password if none provided
+        const defaultPassword = password || generateSecurePassword();
+        const hashedPassword = await bcrypt.hash(defaultPassword, 12);
 
         // Transaction
         const result = await prisma.$transaction(async (tx) => {
@@ -148,18 +176,23 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
             // Continue even if email fails - credentials shown on screen
         }
 
-        // Return credentials in response (for on-screen display)
-        res.status(201).json({ 
-            ...result,
+        // Return only safe fields + temporary password for on-screen display
+        // passwordHash is never sent; temporary password shown once so admin can relay to staff
+        res.status(201).json({
+            id: result.id,
+            firstName: result.firstName,
+            lastName: result.lastName,
+            email: result.email,
+            role: result.role,
             credentials: {
                 email,
-                password: defaultPassword
+                temporaryPassword: defaultPassword,
+                mustChange: true
             }
         });
     } catch (error) {
         console.error("Create Staff Error:", error);
-
-        res.status(500).json({ message: 'Failed to create staff', error: (error as any).message });
+        res.status(500).json({ message: 'Failed to create staff' });
     }
 };
 

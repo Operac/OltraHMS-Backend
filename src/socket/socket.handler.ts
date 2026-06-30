@@ -1,5 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../lib/prisma';
+import jwt from 'jsonwebtoken';
+import { dmChannel } from '../controllers/chat.controller';
 
 // Queue event types
 export interface QueueEvent {
@@ -14,101 +16,202 @@ export interface QueueEvent {
     timestamp: Date;
 }
 
+// ────────────────────────────────────────────────────────────
+// Channel access rules — which roles can join each channel
+// ────────────────────────────────────────────────────────────
+const CHANNEL_ROLES: Record<string, string[]> = {
+    general:  ['ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'PHARMACIST', 'LAB_TECH', 'RADIOLOGIST', 'ACCOUNTANT', 'INSURANCE_OFFICER'],
+    doctors:  ['ADMIN', 'DOCTOR'],
+    nurses:   ['ADMIN', 'DOCTOR', 'NURSE'],
+    handover: ['ADMIN', 'DOCTOR', 'NURSE'],
+};
+
+function canJoinChannel(role: string, channel: string): boolean {
+    const allowed = CHANNEL_ROLES[channel];
+    if (!allowed) return false; // Unknown channel — deny
+    return allowed.includes(role);
+}
+
+// ────────────────────────────────────────────────────────────
+// Extract and verify the JWT from the socket handshake
+// ────────────────────────────────────────────────────────────
+function getUserFromSocket(socket: Socket): { id: string; role: string; firstName?: string; lastName?: string } | null {
+    try {
+        const token =
+            socket.handshake.auth?.token ||
+            socket.handshake.headers?.authorization?.replace('Bearer ', '');
+
+        if (!token) return null;
+
+        const secret = process.env.JWT_SECRET;
+        if (!secret) return null;
+
+        const decoded = jwt.verify(token, secret) as any;
+        return decoded;
+    } catch {
+        return null;
+    }
+}
+
 export const setupSocketHandlers = (io: any) => {
-    // Set up namespace for queue events
+    // ────────────────────────────────────────────────────────
+    // Queue namespace — used by reception, nurses, TV display
+    // ────────────────────────────────────────────────────────
     const queueNamespace = io.of('/queue');
-    
+
     queueNamespace.on('connection', (socket: Socket) => {
-        console.log('Queue client connected:', socket.id);
-        
-        // Join specific rooms
         socket.on('join-reception', () => {
             socket.join('reception');
-            console.log('Client joined reception room');
         });
-        
+
         socket.on('join-nurse-station', () => {
             socket.join('nurse-station');
-            console.log('Client joined nurse station room');
         });
-        
+
         socket.on('join-doctor', (doctorId: string) => {
             socket.join(`doctor-${doctorId}`);
-            console.log(`Client joined doctor-${doctorId} room`);
         });
-        
+
         socket.on('join-department', (departmentId: string) => {
             socket.join(`department-${departmentId}`);
         });
-        
+
         socket.on('join-display', () => {
             socket.join('display');
-            console.log('Client joined display room');
         });
-        
-        // Disconnect
-        socket.on('disconnect', () => {
-            console.log('Queue client disconnected:', socket.id);
-        });
+
+        socket.on('disconnect', () => {});
     });
-    
+
     // Store reference for emitting events
     (global as any).queueIO = queueNamespace;
-    
-    io.on('connection', (socket: Socket) => {
 
-        // Join Room
+    // ────────────────────────────────────────────────────────
+    // Main namespace — video signalling + authenticated chat
+    // ────────────────────────────────────────────────────────
+    io.on('connection', (socket: Socket) => {
+        // Resolve the authenticated user for this socket session
+        const socketUser = getUserFromSocket(socket);
+
+        // ── Video call signalling (no role restriction) ──────
         socket.on('join-room', (roomId: string) => {
             socket.join(roomId);
-            // Notify others in room
             socket.to(roomId).emit('user-connected', socket.id);
         });
 
-        // Signaling: Offer
-        socket.on('offer', (data: { offer: any, roomId: string }) => {
+        socket.on('offer', (data: { offer: any; roomId: string }) => {
             socket.to(data.roomId).emit('offer', { offer: data.offer, senderId: socket.id });
         });
 
-        // Signaling: Answer
-        socket.on('answer', (data: { answer: any, roomId: string }) => {
+        socket.on('answer', (data: { answer: any; roomId: string }) => {
             socket.to(data.roomId).emit('answer', { answer: data.answer, senderId: socket.id });
         });
 
-        // Signaling: ICE Candidate
-        socket.on('ice-candidate', (data: { candidate: any, roomId: string }) => {
+        socket.on('ice-candidate', (data: { candidate: any; roomId: string }) => {
             socket.to(data.roomId).emit('ice-candidate', { candidate: data.candidate, senderId: socket.id });
         });
 
-        // Chat
-        socket.on('send-message', async (data: { roomId: string, message: string, senderName: string, senderId: string }) => {
-            // Save to DB
-            try {
-                if (data.senderId) {
-                    await prisma.message.create({
-                        data: {
-                            content: data.message,
-                            senderId: data.senderId,
-                            channel: data.roomId
-                        }
-                    });
-                }
-            } catch (err) {
-                console.error('Error saving message:', err);
+        // ── Chat: join a group channel or DM room ─────────────
+        socket.on('join-chat', (channel: string) => {
+            if (!socketUser) {
+                socket.emit('chat-error', { message: 'Authentication required' });
+                return;
             }
 
-            // Include roomId in the emitted message so frontend can filter correctly
-            // Use io.to() to include sender, so sender sees their own message
-            io.to(data.roomId).emit('receive-message', {
-                message: data.message,
-                senderName: data.senderName,
-                senderId: data.senderId,
-                roomId: data.roomId,
-                timestamp: new Date().toISOString()
-            });
+            if (channel.startsWith('dm:')) {
+                // DM channel — verify this user is one of the two participants
+                const parts = channel.split(':');
+                if (parts.length !== 3 || (parts[1] !== socketUser.id && parts[2] !== socketUser.id)) {
+                    socket.emit('chat-error', { message: 'You are not a participant in this conversation' });
+                    return;
+                }
+            } else if (!canJoinChannel(socketUser.role, channel)) {
+                socket.emit('chat-error', { message: `You do not have access to the #${channel} channel` });
+                return;
+            }
+
+            socket.join(`chat:${channel}`);
         });
 
-        // Leave
-        socket.on('disconnect', () => {
+        // ── Start or open a DM with another user ─────────────
+        socket.on('start-dm', (targetUserId: string) => {
+            if (!socketUser) {
+                socket.emit('chat-error', { message: 'Authentication required' });
+                return;
+            }
+            if (targetUserId === socketUser.id) {
+                socket.emit('chat-error', { message: 'Cannot start a DM with yourself' });
+                return;
+            }
+            const channel = dmChannel(socketUser.id, targetUserId);
+            socket.join(`chat:${channel}`);
+            socket.emit('dm-ready', { channel, targetUserId });
         });
+
+        socket.on('send-message', async (data: {
+            roomId: string;
+            message: string;
+            senderName: string;   // Still accepted for backwards-compat, but IGNORED server-side
+            senderId: string;     // IGNORED — we use the JWT identity
+        }) => {
+            // ── Security: derive identity from JWT, not client payload ──
+            if (!socketUser) {
+                socket.emit('chat-error', { message: 'Authentication required to send messages' });
+                return;
+            }
+
+            const channel = data.roomId;
+
+            // ── Access control ──────────────────────────────────────────
+            if (channel.startsWith('dm:')) {
+                // DM — must be a participant
+                const parts = channel.split(':');
+                if (parts.length !== 3 || (parts[1] !== socketUser.id && parts[2] !== socketUser.id)) {
+                    socket.emit('chat-error', { message: 'You are not a participant in this conversation' });
+                    return;
+                }
+            } else if (!canJoinChannel(socketUser.role, channel)) {
+                socket.emit('chat-error', { message: `You do not have permission to post in #${channel}` });
+                return;
+            }
+
+            // ── Content validation ──────────────────────────────────────
+            const content = typeof data.message === 'string' ? data.message.trim() : '';
+            if (!content || content.length > 2000) {
+                socket.emit('chat-error', { message: 'Invalid message content' });
+                return;
+            }
+
+            // ── Persist ─────────────────────────────────────────────────
+            let savedMessage: any = null;
+            try {
+                savedMessage = await prisma.message.create({
+                    data: {
+                        content,
+                        senderId: socketUser.id,
+                        channel
+                    },
+                    include: {
+                        sender: { select: { firstName: true, lastName: true, role: true } }
+                    }
+                });
+            } catch (err) {
+                console.error('Error saving chat message:', err);
+            }
+
+            const payload = {
+                message:    content,
+                senderName: `${savedMessage?.sender?.firstName ?? 'Unknown'} ${savedMessage?.sender?.lastName ?? ''}`.trim(),
+                senderId:   socketUser.id,
+                senderRole: socketUser.role,
+                roomId:     channel,
+                timestamp:  savedMessage?.createdAt?.toISOString() ?? new Date().toISOString()
+            };
+
+            // Broadcast to the authenticated chat room (includes sender)
+            io.to(`chat:${channel}`).emit('receive-message', payload);
+        });
+
+        socket.on('disconnect', () => {});
     });
 };

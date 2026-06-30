@@ -1,15 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Response, NextFunction } from 'express';
 
-// Mock jwt module before importing auth.middleware
-vi.mock('jsonwebtoken', () => ({
-  verify: vi.fn((token: string, secret: string) => {
+// Mock jwt module before importing auth.middleware.
+// auth.middleware uses a default import (`import jwt from 'jsonwebtoken'`), so the
+// mock must expose `verify` on BOTH the default export and as a named export.
+// vi.mock is hoisted above the file body, so the mock fn must be created inside
+// vi.hoisted() to exist before the factory runs.
+const { verifyMock } = vi.hoisted(() => ({
+  verifyMock: vi.fn((token: string, _secret: string) => {
     // Return a promise that resolves with the decoded token (like real jwt.verify)
     if (token === 'invalid-token') {
       return Promise.reject(new Error('Invalid token'));
     }
     return Promise.resolve({ id: 'user-123', email: 'test@example.com', role: 'ADMIN' });
   }),
+}));
+
+vi.mock('jsonwebtoken', () => ({
+  default: { verify: verifyMock },
+  verify: verifyMock,
 }));
 
 import { authenticate, authorize } from './auth.middleware';

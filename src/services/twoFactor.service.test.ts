@@ -1,26 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-// Mock dependencies
-vi.mock('otplib', () => ({
-  authenticator: {
-    generateSecret: vi.fn().mockReturnValue('JBSWY3DPEHPK3PXP'),
-    generate: vi.fn().mockReturnValue('123456'),
-    verify: vi.fn().mockReturnValue({ delta: 0 }),
-    keyuri: vi.fn().mockReturnValue('otpauth://totp/test?secret=JBSWY3DPEHPK3PXP'),
-  },
-}));
-
-vi.mock('qrcode', () => ({
-  toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,mock'),
-}));
-
-import { 
-  generateTwoFactorSecret, 
-  generateTwoFactorQRUrl, 
+import { describe, it, expect } from 'vitest';
+import { authenticator } from 'otplib';
+import {
+  generateTwoFactorSecret,
+  generateTwoFactorQRUrl,
   verifyTwoFactorCode,
   generateBackupCodes,
-  verifyBackupCode 
+  verifyBackupCode,
 } from '../services/twoFactor.service';
+
+// These tests exercise the real otplib implementation rather than mocking it,
+// so they validate actual TOTP behavior and the real return shapes used by the
+// auth controller (boolean from verifyTwoFactorCode, { valid, remainingCodes }
+// from verifyBackupCode).
 
 describe('TwoFactor Service', () => {
   describe('generateTwoFactorSecret', () => {
@@ -33,41 +24,46 @@ describe('TwoFactor Service', () => {
   });
 
   describe('generateTwoFactorQRUrl', () => {
-    it('should generate a QR code URL', async () => {
-      const secret = 'JBSWY3DPEHPK3PXP';
+    it('should generate an otpauth URL containing the issuer and account', () => {
+      const secret = generateTwoFactorSecret();
       const email = 'test@example.com';
-      
-      const url = await generateTwoFactorQRUrl(email, secret);
+
+      const url = generateTwoFactorQRUrl(email, secret);
       expect(url).toContain('otpauth://totp/');
-      expect(url).toContain(encodeURIComponent(email));
+      expect(url).toContain('issuer=OltraHMS');
+      expect(url).toContain(email);
+      expect(url).toContain(secret);
     });
   });
 
   describe('verifyTwoFactorCode', () => {
     it('should verify a valid code', () => {
-      const secret = 'JBSWY3DPEHPK3PXP';
-      const code = '123456';
-      
+      const secret = generateTwoFactorSecret();
+      const code = authenticator.generate(secret); // current valid TOTP
+
       const result = verifyTwoFactorCode(secret, code);
       expect(result).toBe(true);
     });
 
     it('should reject an invalid code', () => {
-      const secret = 'JBSWY3DPEHPK3PXP';
-      const code = '000000';
-      
-      const result = verifyTwoFactorCode(secret, code);
+      const secret = generateTwoFactorSecret();
+
+      const result = verifyTwoFactorCode(secret, '000000');
       expect(result).toBe(false);
     });
   });
 
   describe('generateBackupCodes', () => {
-    it('should generate 8 backup codes', () => {
+    it('should generate 10 backup codes by default', () => {
       const codes = generateBackupCodes();
-      expect(codes).toHaveLength(8);
-      codes.forEach(code => {
-        expect(code).toMatch(/^[a-f0-9]{8}$/);
+      expect(codes).toHaveLength(10);
+      codes.forEach((code) => {
+        expect(code).toMatch(/^[A-F0-9]{8}$/);
       });
+    });
+
+    it('should honor a requested count', () => {
+      expect(generateBackupCodes(5)).toHaveLength(5);
     });
 
     it('should generate unique codes', () => {
@@ -78,31 +74,35 @@ describe('TwoFactor Service', () => {
   });
 
   describe('verifyBackupCode', () => {
-    it('should verify a valid backup code', () => {
+    it('should verify a valid backup code and consume it', () => {
       const codes = generateBackupCodes();
-      const validCode: string = codes[0];
-      
+      const validCode = codes[0];
+
       const result = verifyBackupCode(validCode, codes);
-      expect(result).toBe(true);
+      expect(result.valid).toBe(true);
+      expect(result.remainingCodes).toHaveLength(codes.length - 1);
+      expect(result.remainingCodes).not.toContain(validCode);
     });
 
     it('should reject an invalid backup code', () => {
       const codes = generateBackupCodes();
-      
+
       const result = verifyBackupCode('00000000', codes);
-      expect(result).toBe(false);
+      expect(result.valid).toBe(false);
+      expect(result.remainingCodes).toHaveLength(codes.length);
     });
 
-    it('should reject used backup code', () => {
+    it('should reject a used backup code on second attempt', () => {
       const codes = generateBackupCodes();
-      const usedCode: string = codes[0];
-      
-      // Use the code
-      verifyBackupCode(usedCode, codes);
-      
-      // Try to use again
-      const result = verifyBackupCode(usedCode, codes);
-      expect(result).toBe(false);
+      const usedCode = codes[0];
+
+      // First use consumes it
+      const first = verifyBackupCode(usedCode, codes);
+      expect(first.valid).toBe(true);
+
+      // Re-checking against the remaining codes should fail
+      const second = verifyBackupCode(usedCode, first.remainingCodes);
+      expect(second.valid).toBe(false);
     });
   });
 });

@@ -205,6 +205,11 @@ export const getPatientById = async (req: AuthRequest, res: Response) => {
 
         if (!patient) return res.status(404).json({ message: 'Patient not found' });
 
+        // Patients may only access their own record
+        if (userRole === 'PATIENT' && patient.userId !== req.user?.id) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
         // Calculate Outstanding Balance for staff visibility
         const openInvoices = await prisma.invoice.findMany({
             where: {
@@ -311,15 +316,11 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
     let userId: string | undefined;
     
     try {
-        // Support multiple possible user ID locations
-        userId = req.user?.id || (req.user as any)?.userId || req.body?.userId;
-        console.log('Update profile - User ID:', userId);
-        console.log('Update profile - Full User object:', JSON.stringify(req.user));
-        console.log('Update profile - Headers:', req.headers.authorization?.substring(0, 50) + '...');
+        // Always derive userId from authenticated token — never from request body
+        userId = req.user?.id || (req.user as any)?.userId;
         
         if (!userId) {
-            console.log('No user ID found in request - headers:', req.headers.authorization?.substring(0, 50) + '...');
-            return res.status(401).json({ message: 'Unauthorized - No user ID' });
+            return res.status(401).json({ message: 'Unauthorized' });
         }
 
         const { 

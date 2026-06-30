@@ -50,6 +50,7 @@ import displayRoutes from './routes/display.routes';
 import triageRoutes from './routes/triage.routes';
 import insuranceClaimRoutes from './routes/insurance-claim.routes';
 import insuranceRoutes from './routes/insurance.routes';
+import expenseRoutes from './routes/expense.routes';
 
 const app = express();
 
@@ -97,14 +98,14 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https:"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https:"],  // unsafe-inline needed for Tailwind runtime styles
+            scriptSrc: ["'self'", "https:"],                     // removed unsafe-inline for scripts
             imgSrc: ["'self'", "data:", "https:", "blob:"],
-            connectSrc: ["'self'", "https:", "wss:"],
+            connectSrc: ["'self'", "https:", "wss:", "http://localhost:3000"],
             fontSrc: ["'self'", "https:", "data:"],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'", "https:"],
-            frameSrc: ["'none'"],
+            frameSrc: ["'self'", "https://meet.jit.si"],          // allow Jitsi iframes for telemedicine
             baseUri: ["'self'"],
             formAction: ["'self'"],
             frameAncestors: ["'none'"],
@@ -194,6 +195,7 @@ app.use('/api/display', displayRoutes);
 app.use('/api/triage', triageRoutes);
 app.use('/api/insurance-claim', insuranceClaimRoutes);
 app.use('/api/insurance', insuranceRoutes);
+app.use('/api/expenses', expenseRoutes);
 
 // ============================================
 // 404 NOT FOUND HANDLER

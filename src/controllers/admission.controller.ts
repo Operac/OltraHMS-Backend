@@ -79,7 +79,20 @@ export const admitPatient = async (req: AuthRequest, res: Response) => {
         }
 
         const result = await prisma.$transaction(async (tx) => {
-            // 1. Create Admission Record
+            // 1. Atomically claim the bed: only succeeds if it is STILL vacant.
+            // This prevents two concurrent admissions from grabbing the same bed
+            // (the bed was selected outside the transaction).
+            const claimed = await tx.bed.updateMany({
+                where: { id: bed.id, status: 'VACANT_CLEAN' },
+                data: { status: 'OCCUPIED' }
+            });
+            if (claimed.count === 0) {
+                const err: any = new Error('That bed was just taken by another admission. Please select another bed.');
+                err.statusCode = 409;
+                throw err;
+            }
+
+            // 2. Create Admission Record
             const admission = await tx.admission.create({
                 data: {
                     patientId,
@@ -88,12 +101,6 @@ export const admitPatient = async (req: AuthRequest, res: Response) => {
                     reason,
                     status: 'ADMITTED'
                 }
-            });
-
-            // 2. Update Bed Status
-            await tx.bed.update({
-                where: { id: bed.id },
-                data: { status: 'OCCUPIED' }
             });
 
             // 3. Create Audit Log
@@ -111,7 +118,10 @@ export const admitPatient = async (req: AuthRequest, res: Response) => {
         });
 
         res.status(201).json(result);
-    } catch (error) {
+    } catch (error: any) {
+        if (error?.statusCode === 409) {
+            return res.status(409).json({ message: error.message });
+        }
         console.error("Admit Error:", error);
         res.status(500).json({ message: 'Failed to admit patient' });
     }

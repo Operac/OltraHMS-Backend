@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { Request, Response } from 'express';
 import { AppointmentStatus } from '@prisma/client';
 
-// Mock Prisma
-vi.mock('../lib/prisma', () => ({
-  prisma: {
+// Mock Prisma. Built via vi.hoisted so $transaction can run its callback against
+// the same mock object (the controller now wraps overlap-check + create in a
+// serializable transaction via runSerializable).
+const { prismaMock } = vi.hoisted(() => {
+  const m: any = {
     appointment: {
       findFirst: vi.fn(),
       create: vi.fn(),
@@ -12,16 +14,23 @@ vi.mock('../lib/prisma', () => ({
       findMany: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      aggregate: vi.fn(),
     },
     staff: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
     patient: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
     },
-  },
-}));
+  };
+  // Run the interactive-transaction callback against the same mock instance.
+  m.$transaction = vi.fn(async (fn: any) => fn(m));
+  return { prismaMock: m };
+});
+
+vi.mock('../lib/prisma', () => ({ prisma: prismaMock }));
 
 import { 
   createAppointment, 
@@ -32,6 +41,16 @@ import {
 } from './appointment.controller';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { prisma } from '../lib/prisma';
+
+// The controller rejects bookings in the past, so tests must use dynamic future
+// dates rather than hardcoded calendar dates (which rot into the past over time).
+const futureISO = (daysAhead: number, hour: number, minute: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  d.setHours(hour, minute, 0, 0);
+  d.setMilliseconds(0);
+  return d.toISOString();
+};
 
 describe('Appointment Controller', () => {
   let mockRequest: Partial<AuthRequest>;
@@ -66,8 +85,8 @@ describe('Appointment Controller', () => {
     const validAppointmentData = {
       patientId: 'patient-123',
       doctorId: 'doctor-123',
-      startTime: '2024-03-20T10:00:00Z',
-      endTime: '2024-03-20T10:30:00Z',
+      startTime: futureISO(7, 10, 0),
+      endTime: futureISO(7, 10, 30),
       type: 'FIRST_VISIT',
       reason: 'Regular checkup',
     };
@@ -191,8 +210,8 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.body = {
         ...validAppointmentData,
-        startTime: '2024-03-20T10:30:00Z',
-        endTime: '2024-03-20T10:00:00Z', // End before start
+        startTime: futureISO(7, 10, 30),
+        endTime: futureISO(7, 10, 0), // End before start (both in the future)
       };
       
       (prisma.staff.findUnique as Mock).mockResolvedValue({
@@ -228,8 +247,7 @@ describe('Appointment Controller', () => {
       // Act
       await getAppointments(mockRequest as AuthRequest, mockResponse as Response);
 
-      // Assert
-      expect(mockStatus).toHaveBeenCalledWith(200);
+      // Assert — handler responds via res.json() (HTTP 200 is implicit)
       expect(mockJson).toHaveBeenCalledWith(mockAppointments);
     });
 
@@ -291,8 +309,7 @@ describe('Appointment Controller', () => {
       // Act
       await getAppointmentById(mockRequest as Request, mockResponse as Response);
 
-      // Assert
-      expect(mockStatus).toHaveBeenCalledWith(200);
+      // Assert — handler responds via res.json() (HTTP 200 is implicit)
       expect(mockJson).toHaveBeenCalledWith(mockAppointment);
     });
 
@@ -334,8 +351,7 @@ describe('Appointment Controller', () => {
       // Act
       await updateAppointmentStatus(mockRequest as AuthRequest, mockResponse as Response);
 
-      // Assert
-      expect(mockStatus).toHaveBeenCalledWith(200);
+      // Assert — handler responds via res.json() (HTTP 200 is implicit)
       expect(mockJson).toHaveBeenCalledWith(
         expect.objectContaining({ status: AppointmentStatus.CANCELLED })
       );
@@ -374,30 +390,30 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.params = { id: 'apt-123' };
       mockRequest.body = {
-        startTime: '2024-03-21T10:00:00Z',
-        endTime: '2024-03-21T10:30:00Z',
+        startTime: futureISO(8, 10, 0),
+        endTime: futureISO(8, 10, 30),
       };
-      
+
       const mockAppointment = {
         id: 'apt-123',
         doctorId: 'doctor-123',
-        startTime: new Date('2024-03-20T10:00:00Z'),
-        endTime: new Date('2024-03-20T10:30:00Z'),
+        startTime: new Date(futureISO(7, 10, 0)),
+        endTime: new Date(futureISO(7, 10, 30)),
       };
-      
+
       (prisma.appointment.findUnique as Mock).mockResolvedValue(mockAppointment);
       (prisma.appointment.findFirst as Mock).mockResolvedValue(null); // No conflict
       (prisma.appointment.update as Mock).mockResolvedValue({
         ...mockAppointment,
-        startTime: new Date('2024-03-21T10:00:00Z'),
-        endTime: new Date('2024-03-21T10:30:00Z'),
+        startTime: new Date(futureISO(8, 10, 0)),
+        endTime: new Date(futureISO(8, 10, 30)),
       });
 
       // Act
       await rescheduleAppointment(mockRequest as AuthRequest, mockResponse as Response);
 
-      // Assert
-      expect(mockStatus).toHaveBeenCalledWith(200);
+      // Assert — handler responds via res.json() (HTTP 200 is implicit)
+      expect(mockJson).toHaveBeenCalled();
     });
 
     it('should return 400 if startTime or endTime missing', async () => {
@@ -419,15 +435,15 @@ describe('Appointment Controller', () => {
       // Arrange
       mockRequest.params = { id: 'apt-123' };
       mockRequest.body = {
-        startTime: '2024-03-21T10:00:00Z',
-        endTime: '2024-03-21T10:30:00Z',
+        startTime: futureISO(8, 10, 0),
+        endTime: futureISO(8, 10, 30),
       };
-      
+
       const mockAppointment = {
         id: 'apt-123',
         doctorId: 'doctor-123',
       };
-      
+
       (prisma.appointment.findUnique as Mock).mockResolvedValue(mockAppointment);
       (prisma.appointment.findFirst as Mock).mockResolvedValue({
         id: 'conflicting-apt',

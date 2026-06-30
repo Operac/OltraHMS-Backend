@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { startOfDay, endOfDay } from 'date-fns';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { prisma } from '../lib/prisma';
+import { runSerializable } from '../lib/dbRetry';
 import { sendAppointmentConfirmationEmail } from '../services/email.service';
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '../services/calendar.service';
 import { createNotification } from './notification.controller';
@@ -210,52 +211,57 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
         return res.status(400).json({ message: availability.message });
     }
 
-    // Check for overlaps for this doctor
-    const overlap = await prisma.appointment.findFirst({
-        where: {
-            doctorId, // Relates to Staff.id
-            status: { not: AppointmentStatus.CANCELLED },
-            OR: [
-                { startTime: { lte: start }, endTime: { gt: start } },
-                { startTime: { lt: end }, endTime: { gte: end } },
-                { startTime: { gte: start }, endTime: { lte: end } }
-            ]
-        }
-    });
-
-    if (overlap) {
-        return res.status(409).json({ message: 'Doctor is not available at this time' });
-    }
-
-    const appointment = await prisma.appointment.create({
-        data: {
-            patientId,
-            doctorId,
-            appointmentDate: start,
-            startTime: start,
-            endTime: end,
-            type: type as any, // Only if matches enum, otherwise strictly: type as 'FIRST_VISIT' | 'FOLLOW_UP' | ...
-            reason,
-            // Auto-confirm if booked by staff, otherwise REQUESTED
-            status: ['ADMIN', 'DOCTOR', 'RECEPTIONIST'].includes(req.user?.role || '') 
-                ? AppointmentStatus.CONFIRMED 
-                : AppointmentStatus.REQUESTED
-        },
-        include: {
-            patient: { 
-                select: { 
-                    firstName: true, 
-                    lastName: true, 
-                    patientNumber: true,
-                    user: { select: { email: true, firstName: true, lastName: true } }
-                } 
-            },
-            doctor: { 
-                include: { 
-                    user: { select: { firstName: true, lastName: true } } 
-                } 
+    // Re-check overlaps and create the appointment atomically so two concurrent
+    // bookings cannot both pass the overlap check and double-book the same slot.
+    const appointment = await runSerializable(async (tx) => {
+        const overlap = await tx.appointment.findFirst({
+            where: {
+                doctorId, // Relates to Staff.id
+                status: { not: AppointmentStatus.CANCELLED },
+                OR: [
+                    { startTime: { lte: start }, endTime: { gt: start } },
+                    { startTime: { lt: end }, endTime: { gte: end } },
+                    { startTime: { gte: start }, endTime: { lte: end } }
+                ]
             }
+        });
+
+        if (overlap) {
+            const err: any = new Error('Doctor is not available at this time');
+            err.statusCode = 409;
+            throw err;
         }
+
+        return tx.appointment.create({
+            data: {
+                patientId,
+                doctorId,
+                appointmentDate: start,
+                startTime: start,
+                endTime: end,
+                type: type as any, // Only if matches enum, otherwise strictly: type as 'FIRST_VISIT' | 'FOLLOW_UP' | ...
+                reason,
+                // Auto-confirm if booked by staff, otherwise REQUESTED
+                status: ['ADMIN', 'DOCTOR', 'RECEPTIONIST'].includes(req.user?.role || '')
+                    ? AppointmentStatus.CONFIRMED
+                    : AppointmentStatus.REQUESTED
+            },
+            include: {
+                patient: {
+                    select: {
+                        firstName: true,
+                        lastName: true,
+                        patientNumber: true,
+                        user: { select: { email: true, firstName: true, lastName: true } }
+                    }
+                },
+                doctor: {
+                    include: {
+                        user: { select: { firstName: true, lastName: true } }
+                    }
+                }
+            }
+        });
     });
 
     // Send confirmation email to patient
@@ -286,9 +292,12 @@ export const createAppointment = async (req: AuthRequest, res: Response) => {
 
     res.status(201).json(appointment);
 
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
         return res.status(400).json({ message: 'Validation error', errors: error.issues });
+    }
+    if (error?.statusCode === 409) {
+        return res.status(409).json({ message: error.message });
     }
     console.error(error); // Log real error
     res.status(500).json({ message: 'Failed to create appointment' });
@@ -331,17 +340,25 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
             where.startTime = { gte: startDateTime, lte: endDateTime };
         }
 
+        // Defensive pagination: callers usually filter by date/doctor/patient, but
+        // an unfiltered admin call could otherwise pull the entire table. Cap the
+        // result set (default 500, hard max 1000) with optional ?page/?limit.
+        const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
+        const page = Math.max(Number(req.query.page) || 1, 1);
+
         const appointments = await prisma.appointment.findMany({
             where,
             include: {
                 patient: { select: { firstName: true, lastName: true, patientNumber: true } },
-                doctor: { 
-                    include: { 
-                        user: { select: { firstName: true, lastName: true } } 
-                    } 
+                doctor: {
+                    include: {
+                        user: { select: { firstName: true, lastName: true } }
+                    }
                 }
             },
-            orderBy: { startTime: 'asc' }
+            orderBy: { startTime: 'asc' },
+            take: limit,
+            skip: (page - 1) * limit
         });
 
         res.json(appointments);

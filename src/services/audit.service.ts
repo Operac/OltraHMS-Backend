@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import { Request } from 'express';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // Audit action types - using object instead of enum for flexibility
 export const AuditAction = {

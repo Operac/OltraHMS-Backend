@@ -52,6 +52,51 @@ OltraHMS is a comprehensive Hospital Management System designed to streamline he
 - **Payment Processing**: Secure payment processing with invoice verification before service delivery.
 - **Multi-Currency Support**: Nigerian Naira (₦) support across all financial models.
 - **Refund Processing**: Full refund workflow with refund method selection.
+- **Offline-First Front Desk**: Receptionist check-in/walk-in and nurse triage vitals are captured locally during connectivity/power outages and synced automatically on reconnect (PWA + IndexedDB background sync).
+- **Silent Session Refresh**: Short-lived access tokens are refreshed transparently using the refresh token, so staff are not logged out mid-task.
+
+---
+
+## Recent Updates (June 2026)
+
+### Authentication — Silent Token Refresh
+
+The access token is short-lived (15 minutes). Previously a refresh token was issued at login but never usable, so users were forced back to the login screen every 15 minutes. This is now fully wired:
+
+- Added **`POST /api/auth/refresh`**. It verifies the refresh token, **re-fetches the user** (so role changes and account lockouts take effect on refresh), issues a new 15-minute access token, and **rotates** the refresh token.
+- The frontend stores the refresh token on login and refreshes the access token transparently on a `401`, then retries the original request. Concurrent `401`s share a single in-flight refresh. Users are only sent to `/login` when the refresh token itself is invalid/expired.
+- Relevant files: `src/controllers/auth.controller.ts` (`refreshAccessToken`), `src/routes/auth.routes.ts`, `frontend/src/lib/api.ts` (`installAuthInterceptors`), `frontend/src/context/AuthContext.tsx`.
+
+### Offline-First Capture (Nigeria connectivity resilience)
+
+Building on the existing PWA / Service Worker + IndexedDB foundation, write actions for the two most time-critical front-desk flows are now captured offline and replayed automatically when connectivity returns (NEPA outages / poor signal):
+
+- **Receptionist check-in & walk-in** — `POST /api/queue/checkin`, `POST /api/queue/walkin`
+- **Nurse triage + vitals** — `POST /api/triage`
+
+How it works:
+
+- `submitWithOfflineFallback()` (`frontend/src/services/offlineStorage.ts`) sends the request through the authenticated Axios instance when online; on a genuine network failure (or when `navigator.onLine` is `false`) it stores the request in IndexedDB and returns `{ queued: true }`.
+- Genuine server errors (validation / permission) are surfaced normally and are **not** queued.
+- `syncAllPendingData()` replays queued requests on reconnect using the correct API base URL and a fresh auth token. The server assigns queue tokens on replay (server-wins).
+- The UI shows an *"Offline — saved, will sync when connection returns"* message for queued actions.
+
+> Other write flows (patient registration, appointment booking, etc.) still require connectivity.
+
+### Backend Test Suite (Vitest)
+
+- The backend has a Vitest unit-test suite covering auth middleware, 2FA, appointments, public/waitlist, calendar, sanitization, and validation.
+- Run with `npm test` (watch) or `npm run test:run` (single run / CI). **Current status: 94 tests passing.**
+
+### Scaling & Concurrency Hardening
+
+- **Single Prisma connection pool**: removed 5 duplicate `new PrismaClient()` instances; everything now imports the shared `src/lib/prisma.ts`. Avoids connection-pool exhaustion under load.
+- **Production query logging disabled** (only `warn`/`error` in production).
+- **Race conditions fixed**: bed allocation claims the bed with a conditional update; queue numbering and appointment slot booking run in serializable transactions with retry (`src/lib/dbRetry.ts`). No more double-booked beds/slots or duplicate queue numbers under concurrent use.
+- **Rate limiting tuned for hospitals** (staff share one NAT IP): the protected-route limiter is keyed per authenticated user, login per account/email, and token refresh has its own generous limiter.
+- **Defensive pagination** on `GET /api/appointments` (default 500, max 1000, optional `?page`/`?limit`).
+
+> **Deployment note**: server-side sessions and rate-limit counters are **in-memory**, so run the backend as a **single instance**. To scale horizontally, move both to a shared store (e.g. Redis).
 
 ---
 
@@ -76,7 +121,7 @@ OltraHMS is a comprehensive Hospital Management System designed to streamline he
 | **Frontend** | React, TypeScript, Vite, Tailwind CSS, Axios, React Hook Form, Zod |
 | **Backend** | Node.js, Express, TypeScript, Prisma ORM, PostgreSQL |
 | **Real-time** | Socket.io (Chat, Notifications, Video Signaling) |
-| **Testing** | Playwright (End-to-End) |
+| **Testing** | Vitest (Backend Unit), Playwright (Frontend End-to-End) |
 | **File Storage** | Cloudinary |
 | **Authentication** | JWT (Access + Refresh Tokens) |
 
@@ -291,7 +336,17 @@ VITE_SOCKET_URL=http://localhost:3000
 
 ## Running Tests
 
-To execute the End-to-End test suite using Playwright:
+### Backend unit tests (Vitest)
+
+```bash
+cd backend
+npm test          # watch mode
+npm run test:run  # single run (CI)
+```
+
+Current status: **94 tests passing** across auth, 2FA, appointments, public/waitlist, calendar, sanitization, and validation.
+
+### Frontend End-to-End tests (Playwright)
 
 ```bash
 cd frontend
@@ -397,7 +452,7 @@ The API includes:
 | Module | Description |
 
 |--------|------------- |
-| `/api/auth` | Authentication (login, register, 2FA, password reset, profile) |
+| `/api/auth` | Authentication (login, register, token refresh, 2FA, password reset, profile) |
 | `/api/patients` | Patient management, profiles, medication schedules |
 | `/api/appointments` | Appointment scheduling, rescheduling |
 | `/api/medical-records` | Clinical records (SOAP format), PDF downloads |

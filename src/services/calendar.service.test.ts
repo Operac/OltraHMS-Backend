@@ -61,7 +61,7 @@ describe('Calendar Service', () => {
       expect(result).toBeNull();
       expect(prisma.appointment.findUnique).toHaveBeenCalledWith({
         where: { id: 'non-existent-id' },
-        expect: {
+        include: {
           patient: { include: { user: true } },
           doctor: { include: { user: true } },
         },

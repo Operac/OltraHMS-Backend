@@ -1,30 +1,39 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { joinWaitlist } from './public.controller';
 import { waitlistService } from '../services/waitlist.service';
 import { Request, Response } from 'express';
 
-// Mock the waitlist service
-jest.mock('../services/waitlist.service');
+// Mock the waitlist service (project runs Vitest, not Jest)
+vi.mock('../services/waitlist.service', () => ({
+  waitlistService: { addToWaitlist: vi.fn() },
+}));
+
+// Mock the audit service so the success path doesn't touch the real database
+// (logAudit -> Prisma) and hang the test.
+vi.mock('../services/audit.service', () => ({
+  logAudit: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('Join Waitlist Controller', () => {
   let mockReq: Partial<Request>;
   let mockRes: Partial<Response>;
-  let jsonMock: jest.Mock;
-  let statusMock: jest.Mock;
+  let jsonMock: ReturnType<typeof vi.fn>;
+  let statusMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    jsonMock = jest.fn().mockReturnValue({});
-    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    jsonMock = vi.fn().mockReturnValue({});
+    statusMock = vi.fn().mockReturnValue({ json: jsonMock });
     mockRes = {
       status: statusMock,
       json: jsonMock,
     };
     mockReq = {
       body: {},
-      get: jest.fn(),
+      get: vi.fn(),
     };
 
     // Clear all mocks before each test
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should return 400 for missing name or email', async () => {
@@ -58,7 +67,7 @@ describe('Join Waitlist Controller', () => {
     };
 
     // Mock service response
-    (waitlistService.addToWaitlist as jest.Mock).mockResolvedValue({
+    vi.mocked(waitlistService.addToWaitlist).mockResolvedValue({
       success: true,
       method: 'SHEET'
     });
@@ -78,7 +87,7 @@ describe('Join Waitlist Controller', () => {
     };
 
     // Mock service to throw error
-    (waitlistService.addToWaitlist as jest.Mock).mockRejectedValue(
+    vi.mocked(waitlistService.addToWaitlist).mockRejectedValue(
       new Error('Service unavailable')
     );
 
@@ -97,7 +106,7 @@ describe('Join Waitlist Controller', () => {
     };
 
     // Mock service to return duplicate prevention
-    (waitlistService.addToWaitlist as jest.Mock).mockResolvedValue({
+    vi.mocked(waitlistService.addToWaitlist).mockResolvedValue({
       success: false,
       message: 'Email already exists in waitlist',
       method: 'DUPLICATE_PREVENTED'

@@ -182,6 +182,28 @@ export const login = async (req: Request, res: Response) => {
         data: { failedLoginAttempts: 0, lockoutUntil: null, lastLogin: new Date() }
     });
 
+    // If 2FA is enabled, require OTP before issuing full token
+    if (user.twoFactorEnabled && user.twoFactorSecret) {
+        const { twoFactorCode } = req.body;
+        if (!twoFactorCode) {
+            return res.status(200).json({ requiresTwoFactor: true, userId: user.id });
+        }
+        const decryptedSecret = decryptSecret(user.twoFactorSecret);
+        const isValidOTP = verifyTwoFactorCode(decryptedSecret, twoFactorCode);
+        if (!isValidOTP) {
+            // Check backup codes
+            const storedCodes = user.twoFactorBackupCodes ? JSON.parse(user.twoFactorBackupCodes) : [];
+            const backupResult = verifyBackupCode(twoFactorCode, storedCodes);
+            if (!backupResult.valid) {
+                return res.status(401).json({ message: 'Invalid 2FA code' });
+            }
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { twoFactorBackupCodes: JSON.stringify(backupResult.remainingCodes) }
+            });
+        }
+    }
+
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) throw new Error("JWT_SECRET is not defined");
 
@@ -226,6 +248,57 @@ export const login = async (req: Request, res: Response) => {
         message: 'Login failed', 
         error: error instanceof Error ? error.message : 'Unknown error' 
     });
+  }
+};
+
+export const refreshAccessToken = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken || typeof refreshToken !== 'string') {
+      return res.status(400).json({ message: 'Refresh token is required' });
+    }
+
+    const refreshSecret = process.env.REFRESH_SECRET;
+    if (!refreshSecret) throw new Error("REFRESH_SECRET is not defined");
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(refreshToken, refreshSecret);
+    } catch {
+      return res.status(401).json({ message: 'Invalid or expired refresh token' });
+    }
+
+    // Re-fetch the user so role/lockout changes take effect on refresh
+    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+    if (!user) {
+      return res.status(401).json({ message: 'User no longer exists' });
+    }
+
+    if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+      return res.status(403).json({ message: 'Account is locked' });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error("JWT_SECRET is not defined");
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      jwtSecret,
+      { expiresIn: '15m' }
+    );
+
+    // Rotate the refresh token so a stolen one has a bounded lifetime
+    const newRefreshToken = jwt.sign(
+      { id: user.id },
+      refreshSecret,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ token, refreshToken: newRefreshToken });
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(500).json({ message: 'Token refresh failed' });
   }
 };
 
@@ -478,6 +551,17 @@ export const verifyTwoFactor = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error verifying 2FA' });
     }
 }
+
+export const getTwoFactorStatus = async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+        const user = await prisma.user.findUnique({ where: { id: userId }, select: { twoFactorEnabled: true } });
+        res.json({ twoFactorEnabled: user?.twoFactorEnabled || false });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching 2FA status' });
+    }
+};
 
 const updateProfileSchema = z.object({
   firstName: z.string().min(2).optional(),
