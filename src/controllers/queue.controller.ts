@@ -145,6 +145,36 @@ export const getAllQueues = async (req: AuthRequest, res: Response) => {
     }
 };
 
+// Flat queue list for the TV/queue-display screen. Returns today's checked-in /
+// in-progress patients as a flat array (the display groups/sorts client-side).
+export const getQueueDisplayList = async (_req: AuthRequest, res: Response) => {
+    try {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const queues = await prisma.appointment.findMany({
+            where: {
+                appointmentDate: { gte: today, lt: tomorrow },
+                status: { in: ['CHECKED_IN', 'IN_PROGRESS'] }
+            },
+            orderBy: [{ queuePosition: 'asc' }, { startTime: 'asc' }],
+            include: {
+                patient: { select: { firstName: true, lastName: true, patientNumber: true } },
+                doctor: {
+                    include: {
+                        user: { select: { firstName: true, lastName: true } },
+                        department: { select: { name: true } }
+                    }
+                }
+            }
+        });
+
+        res.json({ queues });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to fetch queue display' });
+    }
+};
+
 // Check in patient with insurance validation
 export const checkInPatient = async (req: AuthRequest, res: Response) => {
     try {

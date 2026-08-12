@@ -6,6 +6,7 @@ import { Role } from '@prisma/client';
 import { sendCredentialsEmail } from '../services/email.service';
 import crypto from 'crypto';
 import { z } from 'zod';
+import { buildOccupancySummary } from '../services/occupancy.service';
 
 const createStaffSchema = z.object({
     firstName: z.string().min(1).max(100).trim(),
@@ -39,7 +40,8 @@ export const getSystemStats = async (req: AuthRequest, res: Response) => {
             activeStaff,
             todayAppointments,
             unpaidInvoices,
-            totalInpatients
+            totalInpatients,
+            wards,
         ] = await Promise.all([
             prisma.patient.count(),
             prisma.user.count({ where: { role: { not: 'PATIENT' }, status: 'ACTIVE' } }),
@@ -55,7 +57,17 @@ export const getSystemStats = async (req: AuthRequest, res: Response) => {
                 where: { status: 'ISSUED' },
                 _sum: { total: true }
             }),
-            prisma.admission.count({ where: { status: 'ADMITTED' } })
+            prisma.admission.count({ where: { status: 'ADMITTED' } }),
+            prisma.ward.findMany({
+                select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    capacity: true,
+                    beds: { select: { status: true } },
+                },
+                orderBy: { name: 'asc' },
+            })
         ]);
 
         res.json({
@@ -63,7 +75,8 @@ export const getSystemStats = async (req: AuthRequest, res: Response) => {
             activeStaff,
             todayAppointments,
             revenuePending: unpaidInvoices._sum.total || 0,
-            totalInpatients
+            totalInpatients,
+            occupancy: buildOccupancySummary(wards),
         });
     } catch (error) {
         console.error("Stats Error:", error);

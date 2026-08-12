@@ -145,7 +145,14 @@ export const dispenseMedication = async (req: AuthRequest, res: Response) => {
 
         // PRE-PAYMENT GATE: Verify payment cleared before dispensing ANY medication
         const patientUnpaid = await prisma.invoice.findMany({
-            where: { patientId: prescription.patientId, balance: { gt: 0 } },
+            where: {
+                patientId: prescription.patientId,
+                balance: { gt: 0 },
+                OR: [
+                    { prescriptionId },
+                    { medicalRecordId: prescription.medicalRecordId }
+                ]
+            },
             take: 1
         });
         if (patientUnpaid.length > 0) {
@@ -220,14 +227,19 @@ const existingInvoice = await prisma.invoice.findFirst({
         // Payment verification - ALWAYS enforced for production integrity
         // Check ServicePaymentStatus on the prescription
         if (prescription.paymentStatus !== 'CLEARED' && prescription.paymentStatus !== 'WAIVED') {
-            // Also check if there's a PAID invoice (backward compat)
-            const hasPaidInvoice = await prisma.invoice.findFirst({
-                where: {
-                    patientId: prescription.patientId,
-                    status: 'PAID',
-                    medicalRecordId: prescription.medicalRecordId
-                }
-            });
+            // Backward-compat: accept a PAID invoice that specifically covers THIS
+            // prescription's medical record. Guard against the null case — a
+            // prescription with no medicalRecordId must NOT be cleared by some
+            // unrelated paid invoice that also happens to have a null medicalRecordId.
+            const hasPaidInvoice = prescription.medicalRecordId
+                ? await prisma.invoice.findFirst({
+                    where: {
+                        patientId: prescription.patientId,
+                        status: 'PAID',
+                        medicalRecordId: prescription.medicalRecordId
+                    }
+                })
+                : null;
 
             if (!hasPaidInvoice) {
                 return res.status(402).json({
@@ -247,6 +259,8 @@ const existingInvoice = await prisma.invoice.findFirst({
         const result = await prisma.$transaction(async (tx) => {
             let totalCost = 0;
             const invoiceItems: Array<{
+                itemType: string;
+                itemId: string;
                 description: string;
                 quantity: number;
                 unitPrice: number;
@@ -313,6 +327,8 @@ const existingInvoice = await prisma.invoice.findFirst({
                 const itemTotal = batch.medication.price * quantity;
                 totalCost += itemTotal;
                 invoiceItems.push({
+                    itemType: 'PRESCRIPTION',
+                    itemId: prescriptionId,
                     description: `${batch.medication.name} (${quantity} units)`,
                     quantity,
                     unitPrice: batch.medication.price,
@@ -352,6 +368,7 @@ const existingInvoice = await prisma.invoice.findFirst({
                          invoiceNumber: generateInvoiceNumber('INV'),
                          patientId: prescription.patientId,
                          medicalRecordId: prescription.medicalRecordId,
+                         prescriptionId,
                          items: invoiceItems,
                          subtotal: totalCost,
                          tax: 0,
@@ -528,6 +545,8 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                 status: 'ISSUED',
                 items: [
                     {
+                        itemType: 'PRESCRIPTION',
+                        itemId: prescription.id,
                         description: `Medication: ${prescription.medicationName} (${prescription.quantity})`,
                         quantity: prescription.quantity,
                         unitPrice: unitPrice,

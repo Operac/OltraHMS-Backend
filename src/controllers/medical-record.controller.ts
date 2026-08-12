@@ -5,15 +5,17 @@ import { AuthRequest } from '../middleware/auth.middleware';
 
 import { prisma } from '../lib/prisma';
 
+const clinicalValueSchema = z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]);
+
 const medicalRecordSchema = z.object({
   appointmentId: z.string().optional(),
   patientId: z.string(),
   doctorId: z.string(),
   soap: z.object({
-    subjective: z.string(),
-    objective: z.string(),
-    assessment: z.string(),
-    plan: z.string()
+    subjective: clinicalValueSchema,
+    objective: clinicalValueSchema,
+    assessment: clinicalValueSchema,
+    plan: clinicalValueSchema
   }),
   vitals: z.any().optional(), 
   prescriptions: z.array(z.any()).optional(),
@@ -44,10 +46,10 @@ export const createMedicalRecord = async (req: AuthRequest, res: Response) => {
     const recordData = {
         patientId: data.patientId,
         doctorId: doctorId,
-        subjective: data.soap.subjective,
-        objective: data.soap.objective,
-        assessment: data.soap.assessment,
-        plan: data.soap.plan,
+        subjective: typeof data.soap.subjective === 'string' ? data.soap.subjective : JSON.stringify(data.soap.subjective),
+        objective: typeof data.soap.objective === 'string' ? data.soap.objective : JSON.stringify(data.soap.objective),
+        assessment: typeof data.soap.assessment === 'string' ? data.soap.assessment : JSON.stringify(data.soap.assessment),
+        plan: typeof data.soap.plan === 'string' ? data.soap.plan : JSON.stringify(data.soap.plan),
         visitDate: new Date(),
     };
 
@@ -215,10 +217,22 @@ export const downloadMedicalRecordPDF = async (req: AuthRequest, res: Response) 
         // SOAP Notes
         doc.fontSize(14).text('SOAP Notes', { underline: true });
         doc.moveDown(0.5);
-        doc.fontSize(12).text(`Subjective: ${data.subjective}`);
-        doc.text(`Objective: ${data.objective}`);
-        doc.text(`Assessment: ${data.assessment}`);
-        doc.text(`Plan: ${data.plan}`);
+        const clinicalText = (value: unknown): string => {
+            if (typeof value !== 'string') return String(value ?? 'No data');
+            try {
+                const parsed = JSON.parse(value);
+                if (parsed && typeof parsed === 'object') {
+                    return Object.entries(parsed)
+                        .map(([key, item]) => `${key.replace(/([a-z])([A-Z])/g, '$1 $2')}: ${String(item)}`)
+                        .join('\n');
+                }
+            } catch { /* plain clinical text */ }
+            return value;
+        };
+        doc.fontSize(12).text(`Subjective:\n${clinicalText(data.subjective)}`);
+        doc.text(`Objective:\n${clinicalText(data.objective)}`);
+        doc.text(`Assessment:\n${clinicalText(data.assessment)}`);
+        doc.text(`Plan:\n${clinicalText(data.plan)}`);
         doc.moveDown();
 
         // Prescriptions

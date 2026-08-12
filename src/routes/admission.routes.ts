@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { admitPatient, dischargePatient, getBeds, getWard, updateBedStatus } from '../controllers/admission.controller';
+import { admitPatient, createAdmissionDeposit, dischargePatient, getBeds, getWard, payAdmissionDeposit, updateBedStatus } from '../controllers/admission.controller';
 
 const router = Router();
 
@@ -8,6 +8,8 @@ router.use(authenticate);
 
 // View Beds (Accountants, Nurses, Admins, Doctors)
 router.get('/beds', authorize(['ADMIN', 'ACCOUNTANT', 'NURSE', 'DOCTOR']), getBeds);
+router.post('/deposit', authorize(['ADMIN', 'ACCOUNTANT', 'NURSE', 'RECEPTIONIST']), createAdmissionDeposit);
+router.post('/deposit/pay', authorize(['ADMIN', 'ACCOUNTANT', 'NURSE', 'RECEPTIONIST']), payAdmissionDeposit);
 
 // Admit/Discharge (Nurses, Admins)
 router.post('/admit', authorize(['ADMIN', 'NURSE']), admitPatient);

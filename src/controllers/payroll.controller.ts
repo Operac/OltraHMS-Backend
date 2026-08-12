@@ -212,12 +212,20 @@ export const downloadPayslipPDF = async (req: AuthRequest, res: Response) => {
             }
         }
 
+        // Null-safe numeric fields so a missing value can't crash PDF generation.
+        const baseSalary = payroll.baseSalary ?? 0;
+        const bonuses = payroll.bonuses ?? 0;
+        const tax = payroll.tax ?? 0;
+        const deductions = payroll.deductions ?? 0;
+        const netSalary = payroll.netSalary ?? (baseSalary + bonuses - tax - deductions);
+        const fmt = (n: number) => n.toLocaleString();
+
         const doc = new PDFDocument();
-        
+
         // Set response headers for PDF download
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=payslip-${payroll.month}-${payroll.year}.pdf`);
-        
+
         doc.pipe(res);
 
         // Header with Logo placeholder
@@ -251,14 +259,14 @@ export const downloadPayslipPDF = async (req: AuthRequest, res: Response) => {
 
         doc.font('Helvetica').fontSize(10);
         doc.text('Base Salary', 50);
-        doc.text(payroll.baseSalary.toLocaleString(), 200, { width: 100, align: 'right' });
+        doc.text(fmt(baseSalary), 200, { width: 100, align: 'right' });
         doc.text('Tax', 350);
-        doc.text(payroll.tax.toLocaleString(), 500, { width: 80, align: 'right' });
-        
+        doc.text(fmt(tax), 500, { width: 80, align: 'right' });
+
         doc.text('Bonuses', 50);
-        doc.text(payroll.bonuses.toLocaleString(), 200, { width: 100, align: 'right' });
+        doc.text(fmt(bonuses), 200, { width: 100, align: 'right' });
         doc.text('Other Deductions', 350);
-        doc.text(payroll.deductions.toLocaleString(), 500, { width: 80, align: 'right' });
+        doc.text(fmt(deductions), 500, { width: 80, align: 'right' });
 
         doc.moveDown(2);
 
@@ -266,15 +274,15 @@ export const downloadPayslipPDF = async (req: AuthRequest, res: Response) => {
         doc.font('Helvetica-Bold').fontSize(11);
         const totalY = doc.y;
         doc.text('Total Earnings:', 50, totalY);
-        doc.text((payroll.baseSalary + payroll.bonuses).toLocaleString(), 200, { width: 100, align: 'right' });
+        doc.text(fmt(baseSalary + bonuses), 200, { width: 100, align: 'right' });
         doc.text('Total Deductions:', 350, totalY);
-        doc.text((payroll.tax + payroll.deductions).toLocaleString(), 500, { width: 80, align: 'right' });
+        doc.text(fmt(tax + deductions), 500, { width: 80, align: 'right' });
 
         doc.moveDown(2);
 
         // Net Salary (highlighted)
         doc.fontSize(14).font('Helvetica-Bold');
-        doc.text(`NET SALARY: ${payroll.netSalary.toLocaleString()}`, { align: 'center' });
+        doc.text(`NET SALARY: ${fmt(netSalary)}`, { align: 'center' });
 
         doc.moveDown(2);
 

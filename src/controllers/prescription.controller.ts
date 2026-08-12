@@ -147,6 +147,71 @@ export const requestRefill = async (req: AuthRequest, res: Response) => {
     }
 };
 
+// Pharmacist/doctor approves a refill request: the prescription becomes ready to
+// dispense again (PENDING), a refill is consumed, and payment must be re-cleared.
+export const approveRefill = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const prescription = await prisma.prescription.findUnique({ where: { id: String(id) } });
+
+        if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+        if (prescription.status !== 'REFILL_REQUESTED') {
+            return res.status(400).json({ message: 'No pending refill request for this prescription' });
+        }
+
+        if (prescription.refillsRemaining !== null && prescription.refillsRemaining <= 0) {
+            return res.status(400).json({ message: 'No refills remaining on this prescription' });
+        }
+
+        const updated = await prisma.prescription.update({
+            where: { id: String(id) },
+            data: {
+                status: 'PENDING', // ready to be dispensed again
+                refillsRemaining: prescription.refillsRemaining !== null
+                    ? prescription.refillsRemaining - 1
+                    : undefined,
+                lastRefillDate: new Date(),
+                // Refill must be paid for before dispensing again.
+                paymentStatus: 'AWAITING_PAYMENT',
+                clearedAt: null
+            }
+        });
+
+        res.json({ message: 'Refill approved', prescription: updated });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to approve refill' });
+    }
+};
+
+// Pharmacist/doctor denies a refill request: the prescription returns to its
+// previously dispensed state.
+export const denyRefill = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body || {};
+        const prescription = await prisma.prescription.findUnique({ where: { id: String(id) } });
+
+        if (!prescription) return res.status(404).json({ message: 'Prescription not found' });
+        if (prescription.status !== 'REFILL_REQUESTED') {
+            return res.status(400).json({ message: 'No pending refill request for this prescription' });
+        }
+
+        const updated = await prisma.prescription.update({
+            where: { id: String(id) },
+            data: {
+                status: 'DISPENSED',
+                ...(reason ? { instructions: `${prescription.instructions || ''}\n[Refill denied: ${reason}]`.trim() } : {})
+            }
+        });
+
+        res.json({ message: 'Refill denied', prescription: updated });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to deny refill' });
+    }
+};
+
 /**
  * Download Prescription as PDF
  */

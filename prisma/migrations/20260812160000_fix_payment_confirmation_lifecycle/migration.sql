@@ -1,0 +1,1 @@
+ALTER TYPE "PaymentConfirmationStatus" ADD VALUE IF NOT EXISTS 'NOT_SUBMITTED';

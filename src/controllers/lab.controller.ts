@@ -4,6 +4,7 @@ import { createNotification } from './notification.controller';
 import { sendToUser, sendToRole } from '../services/notification.service';
 import { randomBytes } from 'crypto';
 import { LAB_RANGES, isValueCritical, getCriticalFlag, getWarningFlag } from '../config/lab-ranges';
+import type { Prisma } from '@prisma/client';
 
 // Helper function to generate unique invoice numbers
 const generateInvoiceNumber = (prefix: string): string => {
@@ -85,7 +86,14 @@ export const uploadResult = async (req: Request, res: Response) => {
         // (unless STAT priority)
         if (order.priority !== 'STAT') {
             const unpaidInvoices = await prisma.invoice.findMany({
-                where: { patientId: order.patientId, balance: { gt: 0 } },
+                where: {
+                    patientId: order.patientId,
+                    balance: { gt: 0 },
+                    OR: [
+                        { labOrderId: order.id },
+                        { medicalRecordId: order.medicalRecordId }
+                    ]
+                },
                 take: 1
             });
             if (unpaidInvoices.length > 0) {
@@ -121,7 +129,15 @@ export const uploadResult = async (req: Request, res: Response) => {
                     // For non-STAT orders, require CLEARED or WAIVED status
                     if (order.paymentStatus !== 'CLEARED' && order.paymentStatus !== 'WAIVED') {
                         // Also check if invoice is PAID (backward compat)
-                        const linkedInvoice = order.medicalRecord?.invoice;
+                        const linkedInvoice = await prisma.invoice.findFirst({
+                            where: {
+                                OR: [
+                                    { labOrderId: order.id },
+                                    { medicalRecordId: order.medicalRecordId }
+                                ]
+                            },
+                            orderBy: { createdAt: 'desc' }
+                        });
                         const isPaid = linkedInvoice?.status === 'PAID';
 
                         if (!isPaid) {
@@ -169,17 +185,23 @@ export const uploadResult = async (req: Request, res: Response) => {
         });
         
         // Parse resultData if stringified (common with multipart/form-data)
-        let parsedResult = resultData;
+        let parsedResult: unknown = resultData;
         try {
             if (typeof resultData === 'string') parsedResult = JSON.parse(resultData);
         } catch(e) {}
+
+        const normalizedResult = parsedResult && typeof parsedResult === 'object' && !Array.isArray(parsedResult)
+            ? parsedResult as Record<string, unknown>
+            : parsedResult !== undefined && parsedResult !== ''
+                ? { result: parsedResult }
+                : {};
 
         // Auto-generate critical flags based on lab ranges
         const autoCriticalFlags: string[] = [];
         const autoWarningFlags: string[] = [];
         
-        if (parsedResult && typeof parsedResult === 'object') {
-            for (const [testName, value] of Object.entries(parsedResult)) {
+        if (normalizedResult && typeof normalizedResult === 'object') {
+            for (const [testName, value] of Object.entries(normalizedResult)) {
                 // Skip non-numeric values
                 if (typeof value === 'number' && !isNaN(value)) {
                     // Check for critical values
@@ -209,7 +231,7 @@ export const uploadResult = async (req: Request, res: Response) => {
         const result = await prisma.labResult.create({
             data: {
                 labOrderId: id as string,
-                resultData: { ...parsedResult, documentUrl: fileUrl }, // Include file URL in JSON
+                resultData: (fileUrl ? { ...normalizedResult, documentUrl: fileUrl } : normalizedResult) as Prisma.InputJsonValue,
                 criticalFlags: combinedFlags,
                 aiInterpretation,
                 uploadedById: staffId
@@ -306,6 +328,7 @@ export const createInvoice = async (req: Request, res: Response) => {
                 invoiceNumber: generateInvoiceNumber('INV-LAB'),
                 patientId: DOCTOR_ORDER.patientId,
                 medicalRecordId: DOCTOR_ORDER.medicalRecordId, // Link to same visit
+                labOrderId: DOCTOR_ORDER.id,
                 status: 'ISSUED',
                 items: [
                     {
@@ -357,6 +380,7 @@ export const createInvoice = async (req: Request, res: Response) => {
                                 invoiceNumber: generateInvoiceNumber('INV-LAB'),
                                 patientId: existingOrder.patientId,
                                 medicalRecordId: null,  // Create separate invoice if original is paid
+                                labOrderId: existingOrder.id,
                                 status: 'ISSUED',
                                 items: [
                                     {

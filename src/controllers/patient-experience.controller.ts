@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { AppointmentStatus, PrescriptionStatus, Role } from '@prisma/client';
 import { generateJitsiToken, generateRoomName, getJitsiConfig } from '../services/jitsi.service';
 import { createNotification } from './notification.controller';
+import { z } from 'zod';
 
 // Helper to get patient context
 const getPatientContext = async (userId: string) => {
@@ -85,7 +86,12 @@ export const getPrescriptions = async (req: AuthRequest, res: Response) => {
 export const requestRefill = async (req: AuthRequest, res: Response) => {
     try {
         const patient = await getPatientContext(req.user!.id);
-        const { prescriptionId } = req.body;
+        const routePrescriptionId = req.params.prescriptionId;
+        const prescriptionId = (Array.isArray(routePrescriptionId) ? routePrescriptionId[0] : routePrescriptionId) ?? req.body.prescriptionId;
+
+        if (!prescriptionId) {
+            return res.status(400).json({ message: 'Prescription ID is required' });
+        }
         
         // Check if prescription allows refills
         const prescription = await prisma.prescription.findUnique({
@@ -766,6 +772,85 @@ export const getEmergencyProfile = async (req: AuthRequest, res: Response) => {
     }
 };
 
+const emergencyProfileSchema = z.object({
+    emergencyContactName: z.string().trim().max(100).optional().default(''),
+    emergencyContactPhone: z.string().trim().max(20).optional().default(''),
+    emergencyContactRelationship: z.string().trim().max(60).optional(),
+    allergies: z.union([z.string(), z.array(z.string())]).optional(),
+    bloodGroup: z.string().trim().optional(),
+    genotype: z.string().trim().optional(),
+});
+
+const bloodGroupMap: Record<string, string> = {
+    'A+': 'A_POSITIVE', 'A-': 'A_NEGATIVE',
+    'B+': 'B_POSITIVE', 'B-': 'B_NEGATIVE',
+    'AB+': 'AB_POSITIVE', 'AB-': 'AB_NEGATIVE',
+    'O+': 'O_POSITIVE', 'O-': 'O_NEGATIVE',
+};
+
+export const updateEmergencyProfile = async (req: AuthRequest, res: Response) => {
+    try {
+        const data = emergencyProfileSchema.parse(req.body);
+        const patient = await getPatientContext(req.user!.id);
+        const currentContact = patient.emergencyContact && typeof patient.emergencyContact === 'object'
+            ? patient.emergencyContact as Record<string, unknown>
+            : {};
+        const allergies = Array.isArray(data.allergies)
+            ? data.allergies.map((value) => value.trim()).filter(Boolean)
+            : (data.allergies || '').split(/[,\n]/).map((value) => value.trim()).filter(Boolean);
+        const normalizedBloodGroup = data.bloodGroup
+            ? bloodGroupMap[data.bloodGroup.toUpperCase()] || data.bloodGroup.toUpperCase()
+            : undefined;
+        const validBloodGroups = new Set(['A_POSITIVE', 'A_NEGATIVE', 'B_POSITIVE', 'B_NEGATIVE', 'AB_POSITIVE', 'AB_NEGATIVE', 'O_POSITIVE', 'O_NEGATIVE']);
+        const normalizedGenotype = data.genotype?.toUpperCase();
+        const validGenotypes = new Set(['AA', 'AS', 'SS', 'AC', 'SC']);
+
+        const updated = await prisma.patient.update({
+            where: { id: patient.id },
+            data: {
+                emergencyContact: {
+                    ...currentContact,
+                    name: data.emergencyContactName,
+                    phone: data.emergencyContactPhone,
+                    relationship: data.emergencyContactRelationship ?? currentContact.relationship ?? '',
+                },
+                allergies,
+                bloodGroup: normalizedBloodGroup && validBloodGroups.has(normalizedBloodGroup) ? normalizedBloodGroup as any : undefined,
+                genotype: normalizedGenotype && validGenotypes.has(normalizedGenotype) ? normalizedGenotype as any : undefined,
+            },
+            select: { emergencyContact: true, allergies: true, bloodGroup: true, genotype: true },
+        });
+
+        res.json({ message: 'Emergency profile updated successfully', ...updated });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ message: 'Invalid emergency profile', errors: error.flatten().fieldErrors });
+        }
+        console.error('Update Emergency Profile Error:', error);
+        res.status(500).json({ message: 'Failed to update emergency profile' });
+    }
+};
+
+export const removeDependent = async (req: AuthRequest, res: Response) => {
+    try {
+        const guardian = await getPatientContext(req.user!.id);
+        const { id } = req.params as { id: string };
+
+        const removed = await prisma.patient.updateMany({
+            where: { id, guardianId: guardian.id },
+            data: { guardianId: null },
+        });
+
+        if (removed.count === 0) {
+            return res.status(404).json({ message: 'Dependent not found' });
+        }
+
+        res.json({ message: 'Dependent removed successfully' });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Failed to remove dependent' });
+    }
+};
+
 // --- Telemedicine ---
 
 export const initializeVideoSession = async (req: AuthRequest, res: Response) => {
@@ -815,105 +900,4 @@ export const initializeVideoSession = async (req: AuthRequest, res: Response) =>
         res.status(500).json({ message: 'Failed to init video session' });
     }
 };
-
-// --- Payments ---
-
-export const processPayment = async (req: AuthRequest, res: Response) => {
-    try {
-        const patient = await getPatientContext(req.user!.id);
-        const { invoiceId, amount, method, reference } = req.body; // method: 'CARD', 'MOBILE_MONEY'
-
-        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
-        if (invoice.patientId !== patient.id) return res.status(403).json({ message: 'Unauthorized' });
-
-        const isVerified = true; 
-
-        if (isVerified) {
-            // Record Payment
-            const payment = await prisma.payment.create({
-                data: {
-                    invoiceId,
-                    amount: parseFloat(amount),
-                    method,
-                    transactionReference: reference || `REF-${Date.now()}`,
-                    status: 'COMPLETED',
-                    processedById: req.user!.id // Self-processed via Portal
-                }
-            });
-
-            // Update Invoice Status
-            const newPaid = invoice.amountPaid + parseFloat(amount);
-            const newBalance = invoice.total - newPaid;
-            let newStatus = invoice.status;
-            
-            if (newBalance <= 0) newStatus = 'PAID';
-            else if (newPaid > 0) newStatus = 'PARTIAL';
-
-            await prisma.invoice.update({
-                where: { id: invoiceId },
-                data: {
-                    amountPaid: newPaid,
-                    balance: newBalance,
-                    status: newStatus
-                }
-            });
-
-            res.json({ message: 'Payment successful', payment });
-        } else {
-            res.status(400).json({ message: 'Payment verification failed' });
-        }
-    } catch (error: any) {
-        res.status(500).json({ message: 'Failed to process payment' });
-    }
-};
-
-/**
- * Patient submits payment details for confirmation (cash/bank transfer)
- * Updates invoice with payment reference and sets AWAITING_CONFIRMATION status
- */
-export const submitPayment = async (req: AuthRequest, res: Response) => {
-    try {
-        const patient = await getPatientContext(req.user!.id);
-        const { invoiceId, method, reference } = req.body;
-
-        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
-        if (invoice.patientId !== patient.id) return res.status(403).json({ message: 'Unauthorized' });
-
-        const updatedInvoice = await prisma.invoice.update({
-            where: { id: invoiceId },
-            data: {
-                paymentMethod: method || 'BANK_TRANSFER',
-                paymentReference: reference || `PAY-${Date.now()}`,
-                paymentConfirmationStatus: 'AWAITING_CONFIRMATION'
-            }
-        });
-
-        // Notify finance/accountant staff
-        const staffUsers = await prisma.staff.findMany({
-            where: { user: { role: { in: ['ACCOUNTANT', 'ADMIN'] } } },
-            select: { userId: true }
-        });
-
-        const { createNotification } = require('./notification.controller');
-        const { sendToUser } = require('../services/notification.service');
-        
-        const notificationMessage = `Payment submitted by ${patient.firstName} ${patient.lastName} for invoice ${invoice.invoiceNumber}`;
-        for (const staff of staffUsers) {
-            await createNotification(staff.userId, notificationMessage, 'HIGH', 'IN_APP');
-            sendToUser(staff.userId, {
-                type: 'alert',
-                title: 'Payment Submitted',
-                message: notificationMessage,
-                data: { invoiceId: invoice.id, action: 'payment_submitted' }
-            });
-        }
-
-        res.json({ message: 'Payment submitted. Awaiting confirmation.', invoice: updatedInvoice });
-    } catch (error: any) {
-        res.status(500).json({ message: 'Failed to submit payment' });
-    }
-};
-
 

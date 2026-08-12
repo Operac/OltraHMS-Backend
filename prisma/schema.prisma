@@ -130,6 +130,7 @@ enum ClaimItemStatus {
 }
 
 enum PaymentConfirmationStatus {
+  NOT_SUBMITTED
   AWAITING_CONFIRMATION
   CONFIRMED
   REJECTED
@@ -196,10 +197,10 @@ enum PaymentStatus {
 }
 
 enum ServicePaymentStatus {
-  AWAITING_PAYMENT     // invoice exists, patient hasn't paid
-  PAYMENT_SUBMITTED    // patient claims payment, awaiting confirmation
-  CLEARED              // accountant confirmed, service unlocked
-  WAIVED               // admin waived payment (emergency override)
+  AWAITING_PAYMENT // invoice exists, patient hasn't paid
+  PAYMENT_SUBMITTED // patient claims payment, awaiting confirmation
+  CLEARED // accountant confirmed, service unlocked
+  WAIVED // admin waived payment (emergency override)
 }
 
 enum BedStatus {
@@ -372,8 +373,8 @@ model PatientInsurance {
   verifiedBy       String? // Staff ID who verified
   verifiedAt       DateTime?
 
-  annualLimit Float?   // max the HMO covers per year
-  usedAmount  Float    @default(0) // how much has been claimed this year
+  annualLimit Float? // max the HMO covers per year
+  usedAmount  Float     @default(0) // how much has been claimed this year
   validFrom   DateTime?
   validUntil  DateTime?
 
@@ -407,9 +408,10 @@ model Service {
 
   // Relations
   tariffSchedules TariffSchedule[]
+  surgeryCases    SurgeryCase[]
 
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Expense {
@@ -525,7 +527,9 @@ model Staff {
   clearedLabOrders         LabOrder[]         @relation("ClearedLabOrders")
   clearedPrescriptions     Prescription[]     @relation("ClearedPrescriptions")
   clearedRadiologyRequests RadiologyRequest[] @relation("ClearedRadiologyRequests")
-  conductedTriages Triage[]
+  clearedAdmissions        Admission[]        @relation("ClearedAdmissions")
+  clearedSurgeryCases      SurgeryCase[]      @relation("ClearedSurgeryCases")
+  conductedTriages         Triage[]
 }
 
 model Department {
@@ -579,7 +583,7 @@ model Appointment {
   paymentStatus ServicePaymentStatus @default(AWAITING_PAYMENT)
   clearedAt     DateTime?
   clearedById   String?
-  clearedBy     Staff?              @relation("ClearedAppointments", fields: [clearedById], references: [id])
+  clearedBy     Staff?               @relation("ClearedAppointments", fields: [clearedById], references: [id])
   waiverReason  String?
 
   // Relations
@@ -659,7 +663,7 @@ model Prescription {
   paymentStatus ServicePaymentStatus @default(AWAITING_PAYMENT)
   clearedAt     DateTime?
   clearedById   String?
-  clearedBy     Staff?              @relation("ClearedPrescriptions", fields: [clearedById], references: [id])
+  clearedBy     Staff?               @relation("ClearedPrescriptions", fields: [clearedById], references: [id])
   waiverReason  String?
 
   // Relations
@@ -704,8 +708,6 @@ enum RefillStatus {
   DENIED
   COMPLETED
 }
-
-
 
 enum AdmissionStatus {
   ADMITTED
@@ -787,8 +789,8 @@ model Invoice {
   balance    Float
 
   // Insurance split
-  insuranceCoveredAmount Float  @default(0) // what HMO will pay
-  patientResponsibility  Float  @default(0) // what patient must pay (co-pay)
+  insuranceCoveredAmount Float             @default(0) // what HMO will pay
+  patientResponsibility  Float             @default(0) // what patient must pay (co-pay)
   patientInsuranceId     String?
   patientInsurance       PatientInsurance? @relation(fields: [patientInsuranceId], references: [id])
 
@@ -798,7 +800,7 @@ model Invoice {
   type   String        @default("STANDARD") // STANDARD, DEPOSIT
 
   // Payment confirmation for walk-in/bank transfer
-  paymentConfirmationStatus PaymentConfirmationStatus @default(AWAITING_CONFIRMATION)
+  paymentConfirmationStatus PaymentConfirmationStatus @default(NOT_SUBMITTED)
   paymentMethod             PaymentMethod?
   paymentReference          String? // Transaction reference from bank/app
   // Amount patient submitted for confirmation (cash/transfer)
@@ -810,14 +812,18 @@ model Invoice {
   paymentNotes              String? // Admin notes on confirmation
 
   // Service-specific links
-  labOrderId         String?  @unique
+  labOrderId         String?           @unique
   labOrder           LabOrder?         @relation(fields: [labOrderId], references: [id])
-  radiologyRequestId String?  @unique
+  radiologyRequestId String?           @unique
   radiologyRequest   RadiologyRequest? @relation(fields: [radiologyRequestId], references: [id])
-  prescriptionId     String?  @unique
+  prescriptionId     String?           @unique
   prescription       Prescription?     @relation(fields: [prescriptionId], references: [id])
-  appointmentId      String?  @unique
+  appointmentId      String?           @unique
   appointment        Appointment?      @relation(fields: [appointmentId], references: [id])
+  admissionId        String?
+  admission          Admission?        @relation(fields: [admissionId], references: [id])
+  surgeryCaseId      String?
+  surgeryCase        SurgeryCase?      @relation(fields: [surgeryCaseId], references: [id])
 
   // Relations
   payments       Payment[]
@@ -825,6 +831,9 @@ model Invoice {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([admissionId])
+  @@index([surgeryCaseId])
 }
 
 model Payment {
@@ -844,7 +853,7 @@ model Payment {
 
   // Payment gateway support
   gatewayReference String? // Paystack/Flutterwave transaction ref
-  gatewayResponse  Json?   // full gateway response for audit
+  gatewayResponse  Json? // full gateway response for audit
 }
 
 model InsuranceClaim {
@@ -860,16 +869,16 @@ model InsuranceClaim {
   patientId String
   patient   Patient @relation(fields: [patientId], references: [id])
 
-  claimNumber       String     @unique
+  claimNumber       String   @unique
   insuranceProvider String
   submittedAmount   Float
-  submittedAt       DateTime   @default(now())
+  submittedAt       DateTime @default(now())
 
-  status         ClaimStatus @default(DRAFT)
-  trackingNumber String?
+  status          ClaimStatus @default(DRAFT)
+  trackingNumber  String?
   denialRiskScore Float?
 
-  denialReason  String?
+  denialReason   String?
   approvedAmount Float?
 
   // Per-line-item breakdown
@@ -877,9 +886,9 @@ model InsuranceClaim {
 }
 
 model ClaimItem {
-  id             String         @id @default(uuid())
+  id             String          @id @default(uuid())
   claimId        String
-  claim          InsuranceClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claim          InsuranceClaim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
   description    String // e.g., "Malaria Test", "Consultation"
   serviceId      String? // link to Service catalog
   billedAmount   Float // full price of this item
@@ -892,13 +901,13 @@ model ClaimItem {
 
 model TariffSchedule {
   id        String  @id @default(uuid())
-  hmoName   String  // "Hygeia", "AIICO Multishield"
+  hmoName   String // "Hygeia", "AIICO Multishield"
   planName  String? // "Gold", "Silver"
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id])
 
-  hmoPrice Float // agreed price between hospital and HMO
-  effectiveFrom  DateTime @default(now())
+  hmoPrice       Float // agreed price between hospital and HMO
+  effectiveFrom  DateTime  @default(now())
   effectiveUntil DateTime?
 
   @@unique([hmoName, planName, serviceId])
@@ -929,7 +938,7 @@ model LabOrder {
   paymentStatus ServicePaymentStatus @default(AWAITING_PAYMENT)
   clearedAt     DateTime?
   clearedById   String?
-  clearedBy     Staff?              @relation("ClearedLabOrders", fields: [clearedById], references: [id])
+  clearedBy     Staff?               @relation("ClearedLabOrders", fields: [clearedById], references: [id])
   waiverReason  String?
 
   // Relations
@@ -1015,9 +1024,15 @@ model Admission {
   estimatedDischargeDate DateTime?
 
   reason        String
-  status        AdmissionStatus @default(ADMITTED)
+  status        AdmissionStatus      @default(ADMITTED)
+  paymentStatus ServicePaymentStatus @default(AWAITING_PAYMENT)
+  clearedAt     DateTime?
+  clearedById   String?
+  clearedBy     Staff?               @relation("ClearedAdmissions", fields: [clearedById], references: [id])
+  waiverReason  String?
   wardRounds    WardRound[]
   fluidBalances FluidBalance[]
+  invoices      Invoice[]
 }
 
 model Bed {
@@ -1427,7 +1442,7 @@ model RadiologyRequest {
   paymentStatus ServicePaymentStatus @default(AWAITING_PAYMENT)
   clearedAt     DateTime?
   clearedById   String?
-  clearedBy     Staff?              @relation("ClearedRadiologyRequests", fields: [clearedById], references: [id])
+  clearedBy     Staff?               @relation("ClearedRadiologyRequests", fields: [clearedById], references: [id])
   waiverReason  String?
 
   // Relations
@@ -1479,6 +1494,9 @@ model SurgeryCase {
   theaterId String
   theater   OperatingTheater @relation(fields: [theaterId], references: [id])
 
+  procedureServiceId String?
+  procedureService   Service? @relation(fields: [procedureServiceId], references: [id])
+
   scheduledStart DateTime
   scheduledEnd   DateTime
 
@@ -1488,6 +1506,13 @@ model SurgeryCase {
   preOpDiagnosis  String?
   postOpDiagnosis String?
   notes           String?
+
+  paymentStatus ServicePaymentStatus @default(AWAITING_PAYMENT)
+  clearedAt     DateTime?
+  clearedById   String?
+  clearedBy     Staff?               @relation("ClearedSurgeryCases", fields: [clearedById], references: [id])
+  waiverReason  String?
+  invoices      Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

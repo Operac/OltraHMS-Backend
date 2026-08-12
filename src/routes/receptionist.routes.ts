@@ -17,16 +17,18 @@ const router = express.Router();
 // Reception workflows expose and mutate patient data, so authentication alone
 // is not sufficient: every endpoint is restricted to reception staff or admins.
 router.use(authenticate as any);
-router.use(authorize([Role.RECEPTIONIST, Role.ADMIN]) as any);
 
-router.get('/appointments/daily', getDailyAppointments);
+// Read-only operational queues are shared with nurses. Mutating reception
+// workflows remain restricted below.
+router.get('/appointments/daily', authorize([Role.RECEPTIONIST, Role.ADMIN, Role.NURSE]) as any, getDailyAppointments);
+router.get('/patients/search', authorize([Role.RECEPTIONIST, Role.ADMIN, Role.NURSE, Role.DOCTOR]) as any, searchPatients);
+router.get('/doctors', authorize([Role.RECEPTIONIST, Role.ADMIN, Role.DOCTOR]) as any, listDoctors);
+
+router.use(authorize([Role.RECEPTIONIST, Role.ADMIN]) as any);
 router.post('/appointments', bookAppointment);
 router.patch('/appointments/:id/check-in', checkInPatient);
 router.patch('/appointments/:id/no-show', markNoShow);
 
-router.get('/patients/search', searchPatients);
 router.post('/patients', registerPatient);
-
-router.get('/doctors', listDoctors);
 
 export default router;

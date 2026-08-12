@@ -9,7 +9,8 @@ import {
     getAvailableDoctors,
     updateQueuePosition,
     cancelCheckIn,
-    validatePatientInsurance
+    validatePatientInsurance,
+    getQueueDisplayList
 } from '../controllers/queue.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { Role } from '@prisma/client';
@@ -24,6 +25,9 @@ router.get('/insurance/validate/:patientId', authorize([Role.ADMIN, Role.RECEPTI
 
 // Get all queues (reception overview)
 router.get('/', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR, Role.NURSE]) as any, getAllQueues);
+
+// Flat queue list for the TV/queue-display screen
+router.get('/all', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR, Role.NURSE]) as any, getQueueDisplayList);
 
 // Get queue for specific doctor
 router.get('/doctor/:doctorId', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR]) as any, getDoctorQueue);

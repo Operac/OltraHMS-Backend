@@ -193,12 +193,14 @@ export const createDepositInvoice = async (req: AuthRequest, res: Response) => {
             data: {
                 invoiceNumber: `DEP-${Date.now()}`,
                 patientId: admission.patientId,
-                items: [{ description: "Hospital Deposit", amount: Number(amount), quantity: 1 }],
+                admissionId: admission.id,
+                items: [{ itemType: 'ADMISSION', itemId: admission.id, description: "Hospital Deposit", amount: Number(amount), unitPrice: Number(amount), total: Number(amount), quantity: 1 }],
                 subtotal: Number(amount),
                 tax: 0,
                 total: Number(amount),
                 balance: Number(amount),
                 status: 'ISSUED',
+                type: 'DEPOSIT',
                 medicalRecordId: null
             }
         });

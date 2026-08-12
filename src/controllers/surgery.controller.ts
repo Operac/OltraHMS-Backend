@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { prisma } from '../lib/prisma';
 import { startOfDay, endOfDay, addDays } from 'date-fns';
+import { generateInvoiceNumber } from '../lib/invoice.helper';
 
 /**
  * Get all Operating Theaters
@@ -24,20 +25,17 @@ export const getTheaters = async (req: AuthRequest, res: Response) => {
  */
 export const scheduleSurgery = async (req: AuthRequest, res: Response) => {
     try {
-        const { patientId, leadSurgeonId, theaterId, scheduledStart, scheduledEnd, priority, notes, preOpDiagnosis } = req.body;
+        const { patientId, leadSurgeonId, theaterId, procedureServiceId, scheduledStart, scheduledEnd, priority, notes, preOpDiagnosis } = req.body;
 
-        // PRE-PAYMENT GATE: Verify payment cleared before scheduling surgery
-        const unpaidInvoices = await prisma.invoice.findMany({
-            where: { patientId, balance: { gt: 0 } },
-            take: 1
+        const procedure = await prisma.service.findFirst({
+            where: { id: procedureServiceId, type: 'PROCEDURE', isExternal: false }
         });
-        if (unpaidInvoices.length > 0) {
-            return res.status(402).json({
-                message: `Payment required before surgery. Outstanding balance: ₦${unpaidInvoices[0].balance.toLocaleString()}`,
-                requiredPayment: unpaidInvoices[0].balance
-            });
+        if (!procedure || procedure.price <= 0) {
+            return res.status(400).json({ message: 'Select a configured hospital procedure with a positive price' });
         }
-        
+
+        // Scheduling creates the payable invoice; clearance is enforced when
+        // the procedure moves to IN_PROGRESS.
         // Basic Conflict Check
         const start = new Date(scheduledStart);
         const end = new Date(scheduledEnd);
@@ -78,26 +76,45 @@ export const scheduleSurgery = async (req: AuthRequest, res: Response) => {
             return res.status(409).json({ message: 'Lead surgeon is not available at this time. They may have another surgery scheduled.' });
         }
 
-        const surgery = await prisma.surgeryCase.create({
+        const result = await prisma.$transaction(async (tx) => {
+            const surgery = await tx.surgeryCase.create({
+                data: {
+                    patientId,
+                    leadSurgeonId,
+                    theaterId,
+                    procedureServiceId: procedure.id,
+                    scheduledStart: start,
+                    scheduledEnd: end,
+                    priority: priority || 'ELECTIVE',
+                    notes,
+                    preOpDiagnosis,
+                    status: 'SCHEDULED'
+                },
+                include: {
+                    patient: { select: { firstName: true, lastName: true, patientNumber: true } },
+                    theater: true,
+                    procedureService: true,
+                    leadSurgeon: { select: { user: { select: { firstName: true, lastName: true } } } }
+                }
+            });
+
+        const invoice = await tx.invoice.create({
             data: {
+                invoiceNumber: generateInvoiceNumber('INV-SURG'),
                 patientId,
-                leadSurgeonId,
-                theaterId,
-                scheduledStart: start,
-                scheduledEnd: end,
-                priority: priority || 'ELECTIVE',
-                notes,
-                preOpDiagnosis,
-                status: 'SCHEDULED'
-            },
-            include: {
-                patient: { select: { firstName: true, lastName: true, patientNumber: true } },
-                theater: true,
-                leadSurgeon: { select: { user: { select: { firstName: true, lastName: true } } } }
+                surgeryCaseId: surgery.id,
+                status: 'ISSUED',
+                items: [{ itemType: 'SURGERY', itemId: surgery.id, description: procedure.name, quantity: 1, unitPrice: procedure.price, total: procedure.price }],
+                subtotal: procedure.price,
+                tax: 0,
+                total: procedure.price,
+                balance: procedure.price,
             }
         });
+            return { ...surgery, invoice };
+        });
 
-        res.status(201).json(surgery);
+        res.status(201).json(result);
     } catch (error) {
         console.error('Error scheduling surgery:', error);
         res.status(500).json({ message: 'Server error' });
@@ -149,6 +166,21 @@ export const updateStatus = async (req: AuthRequest, res: Response) => {
     try {
         const { id } = req.params;
         const { status, postOpDiagnosis, notes } = req.body;
+
+        if (status === 'IN_PROGRESS') {
+            const existing = await prisma.surgeryCase.findUnique({ where: { id: String(id) } });
+            if (!existing) return res.status(404).json({ message: 'Surgery case not found' });
+            if (existing.paymentStatus !== 'CLEARED' && existing.paymentStatus !== 'WAIVED') {
+                if (existing.priority === 'EMERGENCY') {
+                    await prisma.surgeryCase.update({
+                        where: { id: String(id) },
+                        data: { paymentStatus: 'WAIVED', clearedAt: new Date(), waiverReason: 'Emergency procedure bypass' }
+                    });
+                } else {
+                    return res.status(402).json({ message: 'Payment must be cleared before surgery starts', paymentStatus: existing.paymentStatus });
+                }
+            }
+        }
 
         const updateData: any = { status };
         if (postOpDiagnosis) updateData.postOpDiagnosis = postOpDiagnosis;

@@ -144,14 +144,16 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
         } = req.body;
 
         // PRE-PAYMENT GATE: Check if patient has cleared payment before consultation
-        const unpaidInvoices = await prisma.invoice.findMany({
-            where: { patientId, balance: { gt: 0 } },
-            take: 1
-        });
-        if (unpaidInvoices.length > 0) {
+        const consultationAppointment = appointmentId
+            ? await prisma.appointment.findUnique({ where: { id: appointmentId }, include: { invoice: true } })
+            : null;
+        if (consultationAppointment
+            && consultationAppointment.paymentStatus !== 'CLEARED'
+            && consultationAppointment.paymentStatus !== 'WAIVED'
+            && (consultationAppointment.invoice?.balance || 0) > 0) {
             return res.status(402).json({
-                message: `Payment required before consultation. Outstanding balance: ₦${unpaidInvoices[0].balance.toLocaleString()}`,
-                requiredPayment: unpaidInvoices[0].balance
+                message: `Payment required before consultation. Outstanding balance: ₦${consultationAppointment.invoice!.balance.toLocaleString()}`,
+                requiredPayment: consultationAppointment.invoice!.balance
             });
         }
 
@@ -301,22 +303,28 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
             patientInsuranceId = activeInsurance.id;
         }
 
-        const invoice = await prisma.invoice.create({
-            data: {
-                invoiceNumber: generateInvoiceNumber('INV'),
-                patientId,
-                medicalRecordId: record.id,
-                items: invoiceItems,
-                subtotal,
-                tax: 0,
-                total: subtotal,
-                balance: patientResponsibility,
-                insuranceCoveredAmount,
-                patientResponsibility,
-                patientInsuranceId,
-                status: InvoiceStatus.ISSUED
-            }
-        });
+        const invoice = consultationAppointment?.invoice
+            ? await prisma.invoice.update({
+                where: { id: consultationAppointment.invoice.id },
+                data: { medicalRecordId: record.id }
+            })
+            : await prisma.invoice.create({
+                data: {
+                    invoiceNumber: generateInvoiceNumber('INV'),
+                    patientId,
+                    medicalRecordId: record.id,
+                    appointmentId: appointmentId || null,
+                    items: invoiceItems,
+                    subtotal,
+                    tax: 0,
+                    total: subtotal,
+                    balance: patientResponsibility,
+                    insuranceCoveredAmount,
+                    patientResponsibility,
+                    patientInsuranceId,
+                    status: InvoiceStatus.ISSUED
+                }
+            });
 
         res.status(201).json({ 
             message: 'Consultation saved successfully', 

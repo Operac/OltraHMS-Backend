@@ -32,6 +32,8 @@ export interface CreateInvoiceInput {
     radiologyRequestId?: string;
     prescriptionId?: string;
     appointmentId?: string;
+    admissionId?: string;
+    surgeryCaseId?: string;
     invoiceType?: 'STANDARD' | 'DEPOSIT';
     invoicePrefix?: string;
     tax?: number;  // Optional tax amount; if null, calculates as percentage
@@ -59,6 +61,8 @@ export const createInvoice = async (input: CreateInvoiceInput): Promise<InvoiceC
         radiologyRequestId,
         prescriptionId,
         appointmentId,
+        admissionId,
+        surgeryCaseId,
         invoiceType = 'STANDARD',
         invoicePrefix = 'INV',
         taxPercentage = 7.5  // Nigeria VAT
@@ -140,6 +144,8 @@ export const createInvoice = async (input: CreateInvoiceInput): Promise<InvoiceC
             radiologyRequestId: radiologyRequestId || null,
             prescriptionId: prescriptionId || null,
             appointmentId: appointmentId || null,
+            admissionId: admissionId || null,
+            surgeryCaseId: surgeryCaseId || null,
             items: items as any,
             subtotal,
             tax,
@@ -289,7 +295,7 @@ export const processPayment = async (input: ProcessPaymentInput) => {
  * Used for linking specific services to their invoices
  */
 export const linkServiceToInvoice = async (
-    serviceType: 'APPOINTMENT' | 'LAB' | 'PHARMACY' | 'PRESCRIPTION' | 'RADIOLOGY' | 'SURGERY',
+    serviceType: 'APPOINTMENT' | 'LAB' | 'PHARMACY' | 'PRESCRIPTION' | 'RADIOLOGY' | 'SURGERY' | 'INPATIENT',
     serviceId: string,
     invoiceId: string
 ) => {
@@ -302,6 +308,10 @@ export const linkServiceToInvoice = async (
                 ? 'radiologyRequestId'
                 : serviceType === 'PRESCRIPTION'
                   ? 'prescriptionId'
+                  : serviceType === 'SURGERY'
+                    ? 'surgeryCaseId'
+                    : serviceType === 'INPATIENT'
+                      ? 'admissionId'
                   : null;
 
     if (!field) throw new Error(`Unknown service type: ${serviceType}`);

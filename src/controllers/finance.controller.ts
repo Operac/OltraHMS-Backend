@@ -3,7 +3,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
-import { PaymentMethod } from '@prisma/client';
+import { InvoiceStatus, PaymentConfirmationStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { recordInvoicePayment, syncLinkedServicesPaymentStatus } from '../services/payment.service';
 
 // Validation schema for processing payment
 const processPaymentSchema = z.object({
@@ -58,83 +59,22 @@ export const getPendingInvoices = async (req: AuthRequest, res: Response) => {
  */
 export const processPayment = async (req: AuthRequest, res: Response) => {
     try {
-        // Validate input with Zod
         const validatedData = processPaymentSchema.parse(req.body);
         const { invoiceId, amount, method, reference } = validatedData;
-        
-        // Get the numeric amount
         const numericAmount = typeof amount === 'number' ? amount : parseFloat(amount);
-
-        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
-        
-        // CRITICAL: Validate payment doesn't exceed balance
-        if (numericAmount > invoice.balance) {
-            return res.status(400).json({
-                message: `Payment amount exceeds outstanding balance. Max payable: ₦${invoice.balance.toLocaleString()}`,
-                maxPayable: invoice.balance,
-                amountRequested: numericAmount
-            });
-        }
-
-        // VALIDATION: Prevent payments exceeding outstanding balance
-        if (numericAmount > invoice.balance) {
-            return res.status(400).json({ 
-                message: `Payment amount exceeds outstanding balance. Outstanding: ₦${invoice.balance.toLocaleString()}. Max payable: ₦${invoice.balance.toLocaleString()}` 
-            });
-        }
-
-        // VALIDATION: Prevent negative amounts
-        if (numericAmount <= 0) {
-            return res.status(400).json({ message: 'Payment amount must be greater than zero' });
-        }
-
-        const result = await prisma.$transaction(async (tx) => {
-            // 1. Create Payment Record
-            const payment = await tx.payment.create({
-                data: {
-                    invoiceId,
-                    amount: numericAmount,
-                    method,
-                    transactionReference: reference || `REF-${Date.now()}`,
-                    status: 'COMPLETED',
-                    processedById: req.user!.id
-                }
-            });
-
-            // 2. Update Invoice Status
-            const newAmountPaid = invoice.amountPaid + numericAmount;
-            const newBalance = invoice.total - newAmountPaid;
-            
-            const newStatus = newBalance <= 0 ? 'PAID' : 'PARTIAL';
-
-            await tx.invoice.update({
-                where: { id: invoiceId },
-                data: {
-                    amountPaid: newAmountPaid,
-                    balance: Math.max(newBalance, 0),  // Prevent negative balance
-                    status: newStatus
-                }
-            });
-
-            // 3. Log Audit
-            await tx.auditLog.create({
-                data: {
-                    userId: req.user!.id,
-                    action: 'PROCESS_PAYMENT',
-                    entityType: 'Invoice',
-                    entityId: invoiceId,
-                    details: `Processed payment of ${amount} via ${method}`
-                }
-            });
-
-            return { payment, newStatus };
+        const result = await recordInvoicePayment({
+            invoiceId,
+            amount: numericAmount,
+            method,
+            reference,
+            processedById: req.user!.id,
         });
 
-        res.json(result);
+        res.json({ message: 'Payment recorded successfully', result });
     } catch (error) {
         console.error("Payment Error:", error);
-        res.status(500).json({ message: 'Failed to process payment' });
+        const message = error instanceof Error ? error.message : 'Failed to process payment';
+        res.status(error instanceof z.ZodError ? 400 : 409).json({ message });
     }
 };
 
@@ -170,7 +110,7 @@ export const processRefund = async (req: AuthRequest, res: Response) => {
                     amount: -refundAmount, // Negative for refund
                     method: 'CASH', // Refund via cash or original method
                     transactionReference: `REFUND-${Date.now()}`,
-                    status: 'COMPLETED',
+                    status: PaymentStatus.REFUNDED,
                     processedById: req.user!.id
                 }
             });
@@ -183,16 +123,23 @@ export const processRefund = async (req: AuthRequest, res: Response) => {
                 throw new Error('Refund would create negative balance. Please verify invoice total.');
             }
             
-            const newStatus = newBalance <= 0 ? 'PAID' : 'PARTIAL';
+            const newStatus = newAmountPaid === 0 ? InvoiceStatus.REFUNDED : InvoiceStatus.PARTIAL;
 
             await tx.invoice.update({
                 where: { id: invoiceId },
                 data: {
                     amountPaid: newAmountPaid,
                     balance: Math.max(newBalance, 0),  // Prevent negative balance
-                    status: newStatus
+                    status: newStatus,
+                    paymentConfirmationStatus: PaymentConfirmationStatus.NOT_SUBMITTED,
+                    paymentConfirmedAt: null,
+                    paymentConfirmedById: null,
                 }
             });
+
+            // A refund reopens every service covered by the invoice, including
+            // aggregate invoices whose links live in their item metadata.
+            await syncLinkedServicesPaymentStatus(tx, invoiceId, req.user!.id, 'AWAITING_PAYMENT');
 
             // 3. Log Audit
             await tx.auditLog.create({

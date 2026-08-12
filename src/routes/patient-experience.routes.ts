@@ -12,6 +12,7 @@ import {
     cancelAppointment, 
     getDependents, 
     addDependent,
+    removeDependent,
     getMedicalRecords,
     getLabResults,
     getPrescriptions,
@@ -24,9 +25,8 @@ import {
     markNotificationRead,
     getQueueStatus,
     getEmergencyProfile,
-    initializeVideoSession,
-    processPayment,
-    submitPayment
+    updateEmergencyProfile,
+    initializeVideoSession
 } from '../controllers/patient-experience.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
@@ -34,6 +34,10 @@ const router = Router();
 
 // Routes accessible by PATIENT only (and ADMIN maybe)
 router.use(authenticate);
+
+// Staff-wide insurance view must be declared before the patient-only guard.
+router.get('/insurance/all', authorize(['ADMIN', 'RECEPTIONIST', 'ACCOUNTANT', 'INSURANCE_OFFICER']) as any, getAllPatientInsurance);
+
 router.use(authorize(['PATIENT', 'ADMIN']));
 
 // Medical Records
@@ -41,6 +45,7 @@ router.get('/medical-records', getMedicalRecords);
 router.get('/lab-results', getLabResults);
 router.get('/prescriptions', getPrescriptions);
 router.post('/prescriptions/refill', requestRefill);
+router.post('/prescriptions/:prescriptionId/refill', requestRefill);
 
 // Billing
 router.get('/invoices', getInvoices);
@@ -59,9 +64,6 @@ router.patch('/insurance/:id', updateInsurancePolicy);
 router.delete('/insurance/:id', deleteInsurancePolicy);
 router.patch('/insurance/:insuranceId/verify', verifyInsurance);
 
-// Admin/Reception/Accountant routes for all patient insurance
-router.get('/insurance/all', authenticate, authorize(['ADMIN', 'RECEPTIONIST', 'ACCOUNTANT', 'INSURANCE_OFFICER']) as any, getAllPatientInsurance);
-
 // Medications
 router.get('/medications/adherence', getMedicationAdherence);
 router.post('/medications/log', logMedicationTaken);
@@ -74,6 +76,7 @@ router.get('/queue-status', getQueueStatus);
 // Family
 router.get('/dependents', getDependents);
 router.post('/dependents', addDependent);
+router.delete('/dependents/:id', removeDependent);
 
 // Notifications
 router.get('/notifications', getNotifications);
@@ -81,13 +84,10 @@ router.patch('/notifications/:id/read', markNotificationRead);
 
 // Emergency
 router.get('/emergency-profile', getEmergencyProfile);
+router.put('/emergency-profile', updateEmergencyProfile);
 
 
 // Telemedicine
 router.post('/telemedicine/session', initializeVideoSession);
-
-// Payments
-router.post('/payments/process', processPayment);
-router.post('/payments/submit', submitPayment);
 
 export default router;

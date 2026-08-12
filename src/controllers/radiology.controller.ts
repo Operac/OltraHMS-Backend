@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { prisma } from '../lib/prisma';
 import cloudinary from '../config/cloudinary';
+import { generateInvoiceNumber } from '../lib/invoice.helper';
 
 /**
  * Helper to get staff ID from user ID
@@ -44,24 +45,47 @@ export const createRequest = async (req: AuthRequest, res: Response) => {
             return res.status(403).json({ message: 'Only staff can create requests' });
         }
 
-        const request = await prisma.radiologyRequest.create({
-            data: {
-                patientId,
-                testId,
-                doctorId,
-                priority: priority || 'ROUTINE',
-                notes,
-                status: 'PENDING'
-            },
-            include: {
-                test: true,
-                patient: {
-                    select: { firstName: true, lastName: true, patientNumber: true }
+        const test = await prisma.radiologyTest.findUnique({ where: { id: testId } });
+        if (!test || test.price <= 0) {
+            return res.status(400).json({ message: 'Radiology pricing is not configured for this test' });
+        }
+
+        const result = await prisma.$transaction(async (tx) => {
+            const request = await tx.radiologyRequest.create({
+                data: {
+                    patientId,
+                    testId,
+                    doctorId,
+                    priority: priority || 'ROUTINE',
+                    notes,
+                    status: 'PENDING'
+                },
+                include: {
+                    test: true,
+                    patient: {
+                        select: { firstName: true, lastName: true, patientNumber: true }
+                    }
                 }
-            }
+            });
+
+            const invoice = await tx.invoice.create({
+                data: {
+                    invoiceNumber: generateInvoiceNumber('INV-RAD'),
+                    patientId,
+                    radiologyRequestId: request.id,
+                    status: 'ISSUED',
+                    items: [{ itemType: 'RADIOLOGY', itemId: request.id, description: test.name, quantity: 1, unitPrice: test.price, total: test.price }],
+                    subtotal: test.price,
+                    tax: 0,
+                    total: test.price,
+                    balance: test.price,
+                }
+            });
+
+            return { ...request, invoice };
         });
 
-        res.status(201).json(request);
+        res.status(201).json(result);
     } catch (error) {
         console.error('Error creating radiology request:', error);
         res.status(500).json({ message: 'Server error' });
@@ -125,6 +149,22 @@ export const addReport = async (req: AuthRequest, res: Response) => {
 
         if (!radiologistId) {
             return res.status(403).json({ message: 'Only staff can submit reports' });
+        }
+
+        const request = await prisma.radiologyRequest.findUnique({ where: { id: requestId } });
+        if (!request) return res.status(404).json({ message: 'Radiology request not found' });
+        if (request.paymentStatus !== 'CLEARED' && request.paymentStatus !== 'WAIVED') {
+            if (request.priority === 'STAT') {
+                await prisma.radiologyRequest.update({
+                    where: { id: requestId },
+                    data: { paymentStatus: 'WAIVED', clearedAt: new Date(), waiverReason: 'STAT priority - emergency bypass' }
+                });
+            } else {
+                return res.status(402).json({
+                    message: 'Payment required before the radiology report can be submitted.',
+                    paymentStatus: request.paymentStatus,
+                });
+            }
         }
 
         // Upload middleware has already stored each image and populated its URL.

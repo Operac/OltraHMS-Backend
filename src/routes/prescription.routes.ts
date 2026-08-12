@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { getPrescriptions, getPrescriptionById, requestRefill, createPrescription, downloadPrescriptionPDF } from '../controllers/prescription.controller';
+import { getPrescriptions, getPrescriptionById, requestRefill, approveRefill, denyRefill, createPrescription, downloadPrescriptionPDF } from '../controllers/prescription.controller';
 
 const router = Router();
 
@@ -13,5 +13,9 @@ router.post('/', authorize(['DOCTOR', 'ADMIN']) as any, createPrescription as an
 
 // Refill Request
 router.post('/:id/refill', authorize(['PATIENT', 'DOCTOR']) as any, requestRefill as any);
+
+// Refill approval / denial (pharmacist or prescribing doctor)
+router.post('/:id/approve-refill', authorize(['PHARMACIST', 'DOCTOR', 'ADMIN']) as any, approveRefill as any);
+router.post('/:id/deny-refill', authorize(['PHARMACIST', 'DOCTOR', 'ADMIN']) as any, denyRefill as any);
 
 export default router;
