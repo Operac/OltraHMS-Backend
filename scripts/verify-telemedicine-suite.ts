@@ -4,7 +4,10 @@ import { prisma } from '../src/lib/prisma';
 import bcrypt from 'bcryptjs';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000/api';
-const PASSWORD = 'password123';
+const PASSWORD = process.env.TEST_PASSWORD;
+if (!PASSWORD || PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 async function ensureUser(email: string, role: string, firstName: string, lastName: string, additionalData: any = {}) {
     let user = await prisma.user.findUnique({ where: { email } });

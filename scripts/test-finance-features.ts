@@ -2,12 +2,16 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:3000/api';
 let token = '';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 const login = async () => {
     try {
         const res = await axios.post(`${API_URL}/auth/login`, {
             email: 'admin@oltrahms.com', 
-            password: 'OltraHMS@123'
+            password: TEST_PASSWORD
         });
         token = (res.data as any).token;
         console.log('Login successful. Token acquired.');

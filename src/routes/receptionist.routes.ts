@@ -1,6 +1,7 @@
 
 import express from 'express';
-import { authenticate } from '../middleware/auth.middleware'; // Assuming this exists, same as doctor
+import { authenticate, authorize } from '../middleware/auth.middleware';
+import { Role } from '@prisma/client';
 import { 
     getDailyAppointments, 
     checkInPatient, 
@@ -13,8 +14,10 @@ import {
 
 const router = express.Router();
 
-// All routes require authentication, potentially RECEPTIONIST role (skipping role check for MVP speed)
-router.use(authenticate);
+// Reception workflows expose and mutate patient data, so authentication alone
+// is not sufficient: every endpoint is restricted to reception staff or admins.
+router.use(authenticate as any);
+router.use(authorize([Role.RECEPTIONIST, Role.ADMIN]) as any);
 
 router.get('/appointments/daily', getDailyAppointments);
 router.post('/appointments', bookAppointment);

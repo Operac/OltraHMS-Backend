@@ -6,6 +6,10 @@ const prisma = new PrismaClient();
 
 async function main() {
   const email = 'admin@oltrahms.com';
+  const password = process.env.SCRIPT_PASSWORD;
+  if (!password) {
+    throw new Error('SCRIPT_PASSWORD must be set');
+  }
   console.log(`Checking user: ${email}`);
 
   const user = await prisma.user.findUnique({
@@ -22,8 +26,8 @@ async function main() {
     console.log(`Password Hash exists: ${!!user.passwordHash}`);
     
     // Verify password
-    const isValid = await bcrypt.compare('OltraHMS@123', user.passwordHash);
-    console.log(`Password 'OltraHMS@123' matches: ${isValid}`);
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    console.log(`Supplied password matches: ${isValid}`);
   }
 }
 

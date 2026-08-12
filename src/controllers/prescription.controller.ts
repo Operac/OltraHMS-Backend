@@ -116,7 +116,7 @@ export const createPrescription = async (req: AuthRequest, res: Response) => {
         res.status(201).json(prescription);
     } catch (error: any) {
         console.error("Create Prescription Error:", error);
-        res.status(500).json({ message: 'Failed to create prescription', error: error.message });
+        res.status(500).json({ message: 'Failed to create prescription' });
     }
 };
 

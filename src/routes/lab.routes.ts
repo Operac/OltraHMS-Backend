@@ -1,23 +1,11 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { getPendingOrders, updateOrderStatus, uploadResult, createInvoice, submitPayment, clearPayment, waivePayment } from '../controllers/lab.controller';
-import multer from 'multer';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
-import cloudinary from '../config/cloudinary';
+import { createCloudinaryUpload } from '../lib/cloudinaryUpload';
 
 const router = Router();
 
-// Configure Multer Storage for Cloudinary
-const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: 'oltrams-lab-results',
-        allowed_formats: ['jpg', 'png', 'pdf'],
-        resource_type: 'auto'
-    } as any
-});
-
-const upload = multer({ storage: storage });
+const upload = createCloudinaryUpload('oltrahms-lab-results');
 
 router.use(authenticate);
 

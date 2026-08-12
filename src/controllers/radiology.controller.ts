@@ -127,10 +127,7 @@ export const addReport = async (req: AuthRequest, res: Response) => {
             return res.status(403).json({ message: 'Only staff can submit reports' });
         }
 
-        // 1. Upload images to Cloudinary (if not using Multer-Cloudinary directly)
-        // Note: If using multer-storage-cloudinary, req.files will already have path/url.
-        // Assuming we configure the route to use multer with cloudinary storage.
-        
+        // Upload middleware has already stored each image and populated its URL.
         const imageUrls = files ? files.map(file => file.path) : [];
 
         // 2. Create Report

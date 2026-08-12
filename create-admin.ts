@@ -6,7 +6,10 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 async function main() {
-    const password = process.env.ADMIN_PASSWORD || 'password123';
+    const password = process.env.ADMIN_PASSWORD;
+    if (!password || password.length < 12) {
+        throw new Error('ADMIN_PASSWORD must be set and contain at least 12 characters');
+    }
     const hash = await bcrypt.hash(password, 12);
     
     // Check if user already exists

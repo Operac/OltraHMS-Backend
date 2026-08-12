@@ -5,12 +5,16 @@ let token = '';
 let patientId = '';
 let labOrderId = '';
 let invoiceId = '';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 const login = async () => {
     try {
         const res = await axios.post(`${API_URL}/auth/login`, {
             email: 'admin@oltraButtons.com',
-            password: 'password123'
+            password: TEST_PASSWORD
         });
         token = res.data.token;
         console.log('Login successful');

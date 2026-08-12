@@ -170,7 +170,7 @@ export const createStaff = async (req: AuthRequest, res: Response) => {
 
         // 4. Send credentials email
         try {
-            await sendCredentialsEmail(email, `${firstName} ${lastName}`, role);
+            await sendCredentialsEmail(email, `${firstName} ${lastName}`, role, defaultPassword);
         } catch (emailError) {
             console.error('Failed to send credentials email:', emailError);
             // Continue even if email fails - credentials shown on screen
@@ -336,6 +336,6 @@ export const getAuditLogs = async (req: AuthRequest, res: Response) => {
         res.json(logs);
     } catch (error) {
         console.error('Error fetching audit logs:', error);
-        res.status(500).json({ message: 'Failed to fetch logs', error: (error as Error).message });
+        res.status(500).json({ message: 'Failed to fetch logs' });
     }
 };

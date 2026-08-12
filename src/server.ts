@@ -8,6 +8,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { apiLimiter, authLimiter } from './middleware/rateLimiter.middleware';
 import { authenticate } from './middleware/auth.middleware';
+import { rejectUnsafeInput } from './middleware/requestSafety.middleware';
 import patientRoutes from './routes/patient.routes';
 import appointmentRoutes from './routes/appointment.routes';
 import medicalRecordRoutes from './routes/medical-record.routes';
@@ -130,7 +131,8 @@ app.use(cors({
     origin: allowedOrigins,
     credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(rejectUnsafeInput);
 
 // ============================================
 // PUBLIC ROUTES (No authentication required)

@@ -15,8 +15,8 @@ const { sheetMock, docMock, GoogleSpreadsheetMock, JWTMock } = vi.hoisted(() => 
   return {
     sheetMock,
     docMock,
-    GoogleSpreadsheetMock: vi.fn(() => docMock),
-    JWTMock: vi.fn(() => ({})),
+    GoogleSpreadsheetMock: vi.fn(function GoogleSpreadsheetMockConstructor() { return docMock; }),
+    JWTMock: vi.fn(function JWTMockConstructor() { return {}; }),
   };
 });
 
@@ -41,8 +41,8 @@ describe('WaitlistService', () => {
     docMock.loadInfo.mockResolvedValue(undefined);
     sheetMock.getRows.mockResolvedValue([]);
     sheetMock.addRow.mockResolvedValue(undefined);
-    GoogleSpreadsheetMock.mockImplementation(() => docMock);
-    JWTMock.mockImplementation(() => ({}));
+    GoogleSpreadsheetMock.mockImplementation(function GoogleSpreadsheetMockConstructor() { return docMock; });
+    JWTMock.mockImplementation(function JWTMockConstructor() { return {}; });
 
     service = new WaitlistService();
     setValidCredentials();

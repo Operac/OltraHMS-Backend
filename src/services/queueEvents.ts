@@ -30,13 +30,16 @@ export function emitToRoom(room: string, event: string, data: any) {
 export function emitQueueEvent(event: QueueEvent) {
     const io = getQueueIO();
     if (io) {
-        // Emit to all rooms
-        io.emit('queue-event', event);
         io.to('reception').emit('queue-event', event);
         io.to('display').emit('queue-event', event);
+        io.to('nurse-station').emit('queue-event', event);
         
         if (event.doctorId) {
             io.to(`doctor-${event.doctorId}`).emit('queue-event', event);
+        }
+
+        if (event.department) {
+            io.to(`department-${event.department}`).emit('queue-event', event);
         }
     }
 }

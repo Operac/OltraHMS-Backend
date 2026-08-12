@@ -4,6 +4,10 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const API_URL = 'http://localhost:3000/api';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 async function main() {
     console.log('🧪 Starting Lab Workflow Verification...');
@@ -12,7 +16,7 @@ async function main() {
         // 1. Setup: Ensure we have a Doctor and a Patient
         const doctorEmail = 'gregory@oltrahms.com';
         const labEmail = 'lab@oltrahms.com';
-        const password = 'OltraHMS@123';
+        const password = TEST_PASSWORD;
 
         // NOTE: We assume these users exist from seed. If not, this script might fail if run on fresh DB without seed.
         // We will try to login.

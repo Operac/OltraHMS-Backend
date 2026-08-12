@@ -43,7 +43,7 @@ export const getMedicalRecords = async (req: AuthRequest, res: Response) => {
 
         res.json({ profile: profileData, history: records });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch records' });
+        res.status(500).json({ message: 'Failed to fetch records' });
     }
 };
 
@@ -61,7 +61,7 @@ export const getLabResults = async (req: AuthRequest, res: Response) => {
         });
         res.json(labs);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch labs' });
+        res.status(500).json({ message: 'Failed to fetch labs' });
     }
 };
 
@@ -78,7 +78,7 @@ export const getPrescriptions = async (req: AuthRequest, res: Response) => {
         });
         res.json(prescriptions);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch prescriptions' });
+        res.status(500).json({ message: 'Failed to fetch prescriptions' });
     }
 };
 
@@ -123,7 +123,7 @@ export const requestRefill = async (req: AuthRequest, res: Response) => {
         
         res.json({ message: 'Refill request submitted' });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to request refill' });
+        res.status(500).json({ message: 'Failed to request refill' });
     }
 };
 
@@ -184,7 +184,7 @@ export const approveRefill = async (req: AuthRequest, res: Response) => {
         
         res.json({ message: 'Refill approved successfully', prescription: updatedPrescription });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to approve refill' });
+        res.status(500).json({ message: 'Failed to approve refill' });
     }
 };
 
@@ -245,7 +245,7 @@ export const denyRefill = async (req: AuthRequest, res: Response) => {
         
         res.json({ message: 'Refill denied successfully', prescription: updatedPrescription });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to deny refill' });
+        res.status(500).json({ message: 'Failed to deny refill' });
     }
 };
 
@@ -262,7 +262,7 @@ export const getInvoices = async (req: AuthRequest, res: Response) => {
         });
         res.json(invoices);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch invoices' });
+        res.status(500).json({ message: 'Failed to fetch invoices' });
     }
 };
 
@@ -278,7 +278,7 @@ export const getWellnessGoals = async (req: AuthRequest, res: Response) => {
         });
         res.json(goals);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch wellness goals' });
+        res.status(500).json({ message: 'Failed to fetch wellness goals' });
     }
 };
 
@@ -315,7 +315,7 @@ export const updateWellnessGoal = async (req: AuthRequest, res: Response) => {
             return res.status(201).json(created);
         }
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to update wellness goal' });
+        res.status(500).json({ message: 'Failed to update wellness goal' });
     }
 };
 
@@ -337,7 +337,7 @@ export const submitFeedback = async (req: AuthRequest, res: Response) => {
         });
         res.status(201).json(feedback);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to submit feedback' });
+        res.status(500).json({ message: 'Failed to submit feedback' });
     }
 };
 
@@ -352,7 +352,7 @@ export const getInsurancePolicies = async (req: AuthRequest, res: Response) => {
         });
         res.json(policies);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch insurance' });
+        res.status(500).json({ message: 'Failed to fetch insurance' });
     }
 };
 
@@ -378,7 +378,7 @@ export const addInsurancePolicy = async (req: AuthRequest, res: Response) => {
         });
         res.status(201).json(policy);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to add insurance' });
+        res.status(500).json({ message: 'Failed to add insurance' });
     }
 };
 
@@ -405,7 +405,7 @@ export const getAllPatientInsurance = async (req: AuthRequest, res: Response) =>
         
         res.json(policies);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch insurance policies' });
+        res.status(500).json({ message: 'Failed to fetch insurance policies' });
     }
 };
 
@@ -432,7 +432,7 @@ export const verifyInsurance = async (req: AuthRequest, res: Response) => {
         
         res.json(policy);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to verify insurance' });
+        res.status(500).json({ message: 'Failed to verify insurance' });
     }
 };
 
@@ -476,7 +476,7 @@ export const updateInsurancePolicy = async (req: AuthRequest, res: Response) => 
         res.json(updated);
     } catch (error: any) {
         console.error('Update Insurance Error:', error);
-        res.status(500).json({ message: error.message || 'Failed to update insurance policy' });
+        res.status(500).json({ message: 'Failed to update insurance policy' });
     }
 };
 
@@ -510,7 +510,7 @@ export const deleteInsurancePolicy = async (req: AuthRequest, res: Response) => 
         res.json({ message: 'Insurance policy deleted successfully' });
     } catch (error: any) {
         console.error('Delete Insurance Error:', error);
-        res.status(500).json({ message: error.message || 'Failed to delete insurance policy' });
+        res.status(500).json({ message: 'Failed to delete insurance policy' });
     }
 };
 
@@ -539,7 +539,7 @@ export const getMedicationAdherence = async (req: AuthRequest, res: Response) =>
         });
         res.json(logs);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch adherence logs' });
+        res.status(500).json({ message: 'Failed to fetch adherence logs' });
     }
 };
 
@@ -568,7 +568,7 @@ export const logMedicationTaken = async (req: AuthRequest, res: Response) => {
         });
         res.status(201).json(log);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to log medication' });
+        res.status(500).json({ message: 'Failed to log medication' });
     }
 };
 
@@ -597,7 +597,7 @@ export const rescheduleAppointment = async (req: AuthRequest, res: Response) => 
 
         res.json(updated);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to reschedule' });
+        res.status(500).json({ message: 'Failed to reschedule' });
     }
 };
 
@@ -618,7 +618,7 @@ export const cancelAppointment = async (req: AuthRequest, res: Response) => {
         if (updated.count === 0) return res.status(404).json({ message: 'Appointment not found' });
         res.json({ message: 'Appointment cancelled' });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to cancel' });
+        res.status(500).json({ message: 'Failed to cancel' });
     }
 };
 
@@ -632,7 +632,7 @@ export const getDependents = async (req: AuthRequest, res: Response) => {
          
          res.json(fullPatient?.dependents || []);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch dependents' });
+        res.status(500).json({ message: 'Failed to fetch dependents' });
     }
 };
 
@@ -671,7 +671,7 @@ export const addDependent = async (req: AuthRequest, res: Response) => {
 
         res.status(201).json(dependent);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to add dependent' });
+        res.status(500).json({ message: 'Failed to add dependent' });
     }
 };
 
@@ -685,7 +685,7 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
         });
         res.json(notifications);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch notifications' });
+        res.status(500).json({ message: 'Failed to fetch notifications' });
     }
 };
 
@@ -698,7 +698,7 @@ export const markNotificationRead = async (req: AuthRequest, res: Response) => {
         });
         res.json({ message: 'Marked as read' });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to update notification' });
+        res.status(500).json({ message: 'Failed to update notification' });
     }
 };
 
@@ -739,7 +739,7 @@ export const getQueueStatus = async (req: AuthRequest, res: Response) => {
             estimatedWaitTime: (position + 1) * 15 // Mock 15 mins per patient
         });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to get queue status' });
+        res.status(500).json({ message: 'Failed to get queue status' });
     }
 };
 
@@ -762,7 +762,7 @@ export const getEmergencyProfile = async (req: AuthRequest, res: Response) => {
         };
         res.json(profile);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to get emergency profile' });
+        res.status(500).json({ message: 'Failed to get emergency profile' });
     }
 };
 
@@ -812,7 +812,7 @@ export const initializeVideoSession = async (req: AuthRequest, res: Response) =>
             useToken: jitsiConfig.useToken
         });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to init video session' });
+        res.status(500).json({ message: 'Failed to init video session' });
     }
 };
 
@@ -864,7 +864,7 @@ export const processPayment = async (req: AuthRequest, res: Response) => {
             res.status(400).json({ message: 'Payment verification failed' });
         }
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to process payment' });
+        res.status(500).json({ message: 'Failed to process payment' });
     }
 };
 
@@ -912,7 +912,7 @@ export const submitPayment = async (req: AuthRequest, res: Response) => {
 
         res.json({ message: 'Payment submitted. Awaiting confirmation.', invoice: updatedInvoice });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to submit payment' });
+        res.status(500).json({ message: 'Failed to submit payment' });
     }
 };
 

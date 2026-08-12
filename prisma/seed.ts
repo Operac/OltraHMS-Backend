@@ -71,7 +71,10 @@ async function main() {
   await prisma.user.deleteMany();
 
   // ─── HELPERS ───────────────────────────────────────────────────────────────
-  const seedPassword = 'password123';
+  const seedPassword = process.env.SEED_PASSWORD;
+  if (!seedPassword || seedPassword.length < 12) {
+    throw new Error('SEED_PASSWORD must be set and contain at least 12 characters');
+  }
   const passwordHash = await bcrypt.hash(seedPassword, 12);
   const hireDate = new Date('2022-01-15');
 
@@ -1181,7 +1184,7 @@ async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🌐 Live URL: https://oltra-hms-frontend.vercel.app');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('📋 LOGIN CREDENTIALS (password for all: password123)');
+  console.log('📋 LOGIN CREDENTIALS (password supplied through SEED_PASSWORD)');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('Role              Email');
   console.log('Admin             admin@oltrahms.com');

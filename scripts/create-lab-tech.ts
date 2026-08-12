@@ -6,6 +6,10 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log('Creating Lab user...');
+  const password = process.env.SCRIPT_PASSWORD;
+  if (!password || password.length < 12) {
+    throw new Error('SCRIPT_PASSWORD must be set and contain at least 12 characters');
+  }
   
   const email = 'lab@oltrahms.com';
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -15,7 +19,7 @@ async function main() {
       return;
   }
 
-  const passwordHash = await bcrypt.hash('OltraHMS@123', 12);
+  const passwordHash = await bcrypt.hash(password, 12);
 
   const labTechUser = await prisma.user.create({
     data: {
@@ -37,7 +41,7 @@ async function main() {
         hireDate: new Date(),
     }
   });
-  console.log('✅ Created Lab Tech: Dexter Morgan (lab@oltrahms.com / OltraHMS@123)');
+  console.log('✅ Created Lab Tech: Dexter Morgan (lab@oltrahms.com)');
 }
 
 main()

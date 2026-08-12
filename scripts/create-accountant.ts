@@ -5,7 +5,10 @@ const prisma = new PrismaClient();
 
 async function main() {
   const email = 'accountant@oltrahms.com';
-  const password = 'OltraHMS@123';
+  const password = process.env.SCRIPT_PASSWORD;
+  if (!password || password.length < 12) {
+    throw new Error('SCRIPT_PASSWORD must be set and contain at least 12 characters');
+  }
   const passwordHash = await bcrypt.hash(password, 12);
 
   console.log(`Creating accountant user: ${email}`);

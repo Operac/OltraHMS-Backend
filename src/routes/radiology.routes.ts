@@ -2,23 +2,11 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { getTests, createRequest, getRequests, addReport } from '../controllers/radiology.controller';
-import multer from 'multer';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
-import cloudinary from '../config/cloudinary';
+import { createCloudinaryUpload } from '../lib/cloudinaryUpload';
 
 const router = Router();
 
-// Configure Multer Storage for Cloudinary
-const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: 'oltrahms-radiology',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'pdf'],
-        resource_type: 'auto'
-    } as any
-});
-
-const upload = multer({ storage: storage });
+const upload = createCloudinaryUpload('oltrahms-radiology');
 
 router.use(authenticate);
 

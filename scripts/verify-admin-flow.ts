@@ -2,6 +2,10 @@ import axios from 'axios';
 import { prisma } from '../src/lib/prisma';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000/api';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 async function verifyAdminFlow() {
     console.log('🛡️ Starting Admin Flow Verification...');
@@ -11,7 +15,7 @@ async function verifyAdminFlow() {
         // Re-use admin@oltra.com
         const loginRes = await axios.post(`${API_URL}/auth/login`, {
             email: 'admin@oltrahms.com', 
-            password: 'OltraHMS@123'
+            password: TEST_PASSWORD
         });
         const token = (loginRes.data as any).token;
         const headers = { Authorization: `Bearer ${token}` };
@@ -31,7 +35,7 @@ async function verifyAdminFlow() {
             firstName: 'Florence',
             lastName: 'Nightingale',
             email: nurseEmail,
-            password: 'password123',
+            password: TEST_PASSWORD,
             role: 'NURSE',
             departmentId: null, // General
             specialization: 'Critical Care'

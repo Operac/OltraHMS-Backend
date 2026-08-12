@@ -49,6 +49,7 @@ export const sendCredentialsEmail = async (
   email: string,
   name: string,
   role: string,
+  temporaryPassword: string,
   patientNumber?: string
 ) => {
   const subject = 'Your Login Credentials - OltraHMS';
@@ -72,11 +73,11 @@ export const sendCredentialsEmail = async (
       <p>Your ${roleDisplay} account has been created. Here are your login credentials:</p>
       <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
         <p style="margin: 8px 0;"><strong>Email:</strong> ${escape(email)}</p>
-        <p style="margin: 8px 0;"><strong>Password:</strong> Oltra123!</p>
+        <p style="margin: 8px 0;"><strong>Temporary password:</strong> ${escape(temporaryPassword)}</p>
         ${patientNumber ? `<p style="margin: 8px 0;"><strong>Patient Number:</strong> ${escape(patientNumber)}</p>` : ''}
       </div>
       <p>Please login at: <a href="${loginUrl}" style="color: #0ea5e9;">${loginUrl}</a></p>
-      <p><strong>Important:</strong> Please change your password after your first login for security.</p>
+      <p><strong>Important:</strong> This is a one-time credential. Please change it immediately after your first login.</p>
       <p style="margin-top: 30px;">Best regards,<br>OltraHMS Team</p>
     </div>
   `;

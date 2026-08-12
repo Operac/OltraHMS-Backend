@@ -69,7 +69,7 @@ export const validatePatientInsurance = async (req: AuthRequest, res: Response) 
         });
     } catch (error) {
         console.error('Insurance validation error:', error);
-        res.status(500).json({ message: 'Failed to validate insurance', error: (error as Error).message });
+        res.status(500).json({ message: 'Failed to validate insurance' });
     }
 };
 

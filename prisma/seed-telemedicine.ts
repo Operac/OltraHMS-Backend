@@ -1,11 +1,16 @@
 // @ts-nocheck
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import 'dotenv/config';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const hashedPassword = await bcrypt.hash('password123', 10);
+  const seedPassword = process.env.SEED_PASSWORD;
+  if (!seedPassword || seedPassword.length < 12) {
+    throw new Error('SEED_PASSWORD must be set and contain at least 12 characters');
+  }
+  const hashedPassword = await bcrypt.hash(seedPassword, 12);
 
   // 1. Upsert Patient
   const patientUser = await prisma.user.upsert({

@@ -411,7 +411,7 @@ export const updatePatientProfile = async (req: AuthRequest, res: Response) => {
     } catch (error: any) {
         console.error("Update Profile Error:", error);
         console.error("Error stack:", error.stack);
-        res.status(500).json({ message: error.message || 'Failed to update profile' });
+        res.status(500).json({ message: 'Failed to update profile' });
     }
 };
 

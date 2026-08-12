@@ -63,7 +63,7 @@ export const getDailyAppointments = async (req: Request, res: Response) => {
 
         res.json(appointments);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch appointments' });
+        res.status(500).json({ message: 'Failed to fetch appointments' });
     }
 };
 
@@ -122,7 +122,7 @@ export const checkInPatient = async (req: Request, res: Response) => {
 
         res.json({ message: 'Patient checked in successfully' });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to check in patient' });
+        res.status(500).json({ message: 'Failed to check in patient' });
     }
 };
 
@@ -137,7 +137,7 @@ export const markNoShow = async (req: Request, res: Response) => {
 
         res.json({ message: 'Appointment marked as No Show' });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to mark as No Show' });
+        res.status(500).json({ message: 'Failed to mark as No Show' });
     }
 };
 
@@ -178,7 +178,7 @@ export const bookAppointment = async (req: Request, res: Response) => {
 
         res.status(201).json(appointment);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to book appointment' });
+        res.status(500).json({ message: 'Failed to book appointment' });
     }
 };
 
@@ -205,7 +205,7 @@ export const searchPatients = async (req: Request, res: Response) => {
 
         res.json(patients);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to search patients' });
+        res.status(500).json({ message: 'Failed to search patients' });
     }
 };
 
@@ -234,7 +234,7 @@ export const registerPatient = async (req: Request, res: Response) => {
             });
         }
 
-        const defaultPassword = 'Oltra123!';
+        const defaultPassword = `Oltra-${randomBytes(12).toString('base64url')}!`;
         const hashedPassword = await bcrypt.hash(defaultPassword, 10);
         const user = await prisma.user.create({
             data: {
@@ -282,7 +282,7 @@ export const registerPatient = async (req: Request, res: Response) => {
         // 4. Send credentials email if email provided
         if (email) {
             try {
-                await sendCredentialsEmail(email, `${firstName} ${lastName}`, 'PATIENT', patientNumber);
+                await sendCredentialsEmail(email, `${firstName} ${lastName}`, 'PATIENT', defaultPassword, patientNumber);
             } catch (emailError) {
                 console.error('Failed to send credentials email:', emailError);
                 // Continue even if email fails - credentials shown on screen
@@ -302,7 +302,7 @@ export const registerPatient = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("Register Patient Error:", error);
-        res.status(500).json({ message: error.message || 'Failed to register patient' });
+        res.status(500).json({ message: 'Failed to register patient' });
     }
 };
 

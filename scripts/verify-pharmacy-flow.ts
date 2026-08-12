@@ -4,6 +4,10 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../src/lib/prisma';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000/api';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 async function verifyPharmacyFlow() {
     console.log('🧪 Starting Pharmacy Flow Verification...');
@@ -48,7 +52,7 @@ async function verifyPharmacyFlow() {
         // Login as ADMIN for simplicity as they have access
         const loginRes = await axios.post(`${API_URL}/auth/login`, {
             email: 'admin@oltrahms.com', 
-            password: 'OltraHMS@123'
+            password: TEST_PASSWORD
         });
         const token = (loginRes.data as any).token;
         const headers = { Authorization: `Bearer ${token}` };
@@ -78,7 +82,7 @@ async function verifyPharmacyFlow() {
         const doctorEmail = 'pharmacy_test_doc@oltra.com';
         let doctorUser = await prisma.user.findUnique({ where: { email: doctorEmail } });
         if (!doctorUser) {
-             const hashedPassword = await bcrypt.hash('OltraHMS@123', 10);
+             const hashedPassword = await bcrypt.hash(TEST_PASSWORD, 12);
              doctorUser = await prisma.user.create({
                  data: {
                      email: doctorEmail,
@@ -99,7 +103,7 @@ async function verifyPharmacyFlow() {
              console.log('   -> Created Doctor for Pharmacy Test');
         }
 
-        const docLogin = await axios.post(`${API_URL}/auth/login`, { email: doctorEmail, password: 'OltraHMS@123' });
+        const docLogin = await axios.post(`${API_URL}/auth/login`, { email: doctorEmail, password: TEST_PASSWORD });
         const docHeaders = { Authorization: `Bearer ${(docLogin.data as any).token}` };
         
 

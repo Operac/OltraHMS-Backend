@@ -47,7 +47,7 @@ export const getDoctorDashboardStats = async (req: AuthRequest, res: Response) =
 
         res.json({ stats, appointments });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch dashboard stats' });
+        res.status(500).json({ message: 'Failed to fetch dashboard stats' });
     }
 };
 
@@ -63,7 +63,7 @@ export const updateAppointmentStatus = async (req: AuthRequest, res: Response) =
 
         res.json(appointment);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to update status' });
+        res.status(500).json({ message: 'Failed to update status' });
     }
 };
 
@@ -84,7 +84,7 @@ export const getAssignedPatients = async (req: AuthRequest, res: Response) => {
         
         res.json(appointments);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch patients' });
+        res.status(500).json({ message: 'Failed to fetch patients' });
     }
 };
 
@@ -125,7 +125,7 @@ export const getPatientMedicalHistory = async (req: AuthRequest, res: Response) 
             history: patient.medicalRecords
         });
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to fetch history' });
+        res.status(500).json({ message: 'Failed to fetch history' });
     }
 };
 
@@ -327,7 +327,7 @@ export const saveConsultation = async (req: AuthRequest, res: Response) => {
 
     } catch (error: any) {
         console.error("Consultation Save Error:", error);
-        res.status(500).json({ message: error.message || 'Failed to save consultation' });
+        res.status(500).json({ message: 'Failed to save consultation' });
     }
 };
 
@@ -348,6 +348,6 @@ export const orderLabs = async (req: AuthRequest, res: Response) => {
         
         res.status(201).json(order);
     } catch (error: any) {
-        res.status(500).json({ message: error.message || 'Failed to order lab' });
+        res.status(500).json({ message: 'Failed to order lab' });
     }
 };

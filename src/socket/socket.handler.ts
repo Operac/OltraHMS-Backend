@@ -59,24 +59,48 @@ export const setupSocketHandlers = (io: any) => {
     // ────────────────────────────────────────────────────────
     const queueNamespace = io.of('/queue');
 
+    queueNamespace.use((socket: Socket, next: (error?: Error) => void) => {
+        const user = getUserFromSocket(socket);
+        if (!user) return next(new Error('Authentication required'));
+        socket.data.user = user;
+        next();
+    });
+
     queueNamespace.on('connection', (socket: Socket) => {
+        const queueUser = socket.data.user as { id: string; role: string };
+
         socket.on('join-reception', () => {
+            if (!['ADMIN', 'RECEPTIONIST'].includes(queueUser.role)) return;
             socket.join('reception');
         });
 
         socket.on('join-nurse-station', () => {
+            if (!['ADMIN', 'DOCTOR', 'NURSE'].includes(queueUser.role)) return;
             socket.join('nurse-station');
         });
 
-        socket.on('join-doctor', (doctorId: string) => {
+        socket.on('join-doctor', async (doctorId: string) => {
+            if (typeof doctorId !== 'string' || doctorId.length > 100) return;
+            if (queueUser.role === 'DOCTOR') {
+                const staff = await prisma.staff.findUnique({
+                    where: { userId: queueUser.id },
+                    select: { id: true }
+                });
+                if (staff?.id !== doctorId) return;
+            } else if (!['ADMIN', 'RECEPTIONIST'].includes(queueUser.role)) {
+                return;
+            }
             socket.join(`doctor-${doctorId}`);
         });
 
         socket.on('join-department', (departmentId: string) => {
+            if (!['ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'].includes(queueUser.role)) return;
+            if (typeof departmentId !== 'string' || departmentId.length > 100) return;
             socket.join(`department-${departmentId}`);
         });
 
         socket.on('join-display', () => {
+            if (!['ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'].includes(queueUser.role)) return;
             socket.join('display');
         });
 
@@ -95,19 +119,23 @@ export const setupSocketHandlers = (io: any) => {
 
         // ── Video call signalling (no role restriction) ──────
         socket.on('join-room', (roomId: string) => {
+            if (!socketUser || typeof roomId !== 'string' || !roomId || roomId.length > 200) return;
             socket.join(roomId);
             socket.to(roomId).emit('user-connected', socket.id);
         });
 
         socket.on('offer', (data: { offer: any; roomId: string }) => {
+            if (!socketUser || typeof data?.roomId !== 'string' || data.roomId.length > 200) return;
             socket.to(data.roomId).emit('offer', { offer: data.offer, senderId: socket.id });
         });
 
         socket.on('answer', (data: { answer: any; roomId: string }) => {
+            if (!socketUser || typeof data?.roomId !== 'string' || data.roomId.length > 200) return;
             socket.to(data.roomId).emit('answer', { answer: data.answer, senderId: socket.id });
         });
 
         socket.on('ice-candidate', (data: { candidate: any; roomId: string }) => {
+            if (!socketUser || typeof data?.roomId !== 'string' || data.roomId.length > 200) return;
             socket.to(data.roomId).emit('ice-candidate', { candidate: data.candidate, senderId: socket.id });
         });
 

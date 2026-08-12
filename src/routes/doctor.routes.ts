@@ -1,23 +1,66 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, authorize } from '../middleware/auth.middleware';
+import { Role } from '@prisma/client';
 import { getDoctorDashboardStats } from '../controllers/doctor.controller';
 import { getDiagnosisSuggestions } from '../services/ai.service';
+import type { AuthRequest } from '../middleware/auth.middleware';
+import { z } from 'zod';
 
 const router = Router();
+const doctorsOnly = authorize([Role.DOCTOR, Role.ADMIN]);
+const aiSuggestionsSchema = z.object({
+    patientId: z.string().uuid().optional(),
+    soap: z.object({
+        subjective: z.string().trim().max(5000).optional(),
+        objective: z.string().trim().max(5000).optional()
+    }).optional(),
+    vitals: z.object({
+        bpSystolic: z.coerce.number().min(20).max(350).optional(),
+        bpDiastolic: z.coerce.number().min(10).max(250).optional(),
+        heartRate: z.coerce.number().min(1).max(350).optional(),
+        temperature: z.coerce.number().min(20).max(50).optional(),
+        oxygenSaturation: z.coerce.number().min(0).max(100).optional()
+    }).optional()
+});
+const telemedicineSchema = z.object({
+    telemedicineAvailable: z.boolean(),
+    telemedicineStartTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    telemedicineEndTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional()
+});
 
 // GET /api/doctor/dashboard/stats - Get doctor's dashboard stats
-router.get('/dashboard/stats', authenticate, getDoctorDashboardStats);
+router.get('/dashboard/stats', authenticate, doctorsOnly, getDoctorDashboardStats);
 
 // GET /api/doctor/ai-status - Check if AI is available
-router.get('/ai-status', authenticate, (_req: Request, res: Response) => {
+router.get('/ai-status', authenticate, doctorsOnly, (_req: Request, res: Response) => {
     res.json({ available: !!process.env.MISTRAL_API_KEY });
 });
 
 // POST /api/doctor/ai-suggestions - Get real-time AI clinical suggestions
-router.post('/ai-suggestions', authenticate, async (req: Request, res: Response) => {
+router.post('/ai-suggestions', authenticate, doctorsOnly, async (req: Request, res: Response) => {
     try {
-        const { patientId, soap, vitals, history } = req.body;
+        const parsed = aiSuggestionsSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ message: 'Invalid clinical input', errors: parsed.error.flatten().fieldErrors });
+        }
+        const { patientId, soap, vitals } = parsed.data;
+        const currentUser = (req as AuthRequest).user;
+
+        if (patientId && currentUser?.role === Role.DOCTOR) {
+            const doctor = await prisma.staff.findUnique({
+                where: { userId: currentUser.id },
+                select: { id: true }
+            });
+            const hasClinicalRelationship = doctor && await prisma.appointment.findFirst({
+                where: { patientId, doctorId: doctor.id },
+                select: { id: true }
+            });
+            if (!hasClinicalRelationship) {
+                return res.status(403).json({ message: 'No clinical relationship with this patient' });
+            }
+        }
+
         const patient = patientId ? await prisma.patient.findUnique({
             where: { id: patientId },
             select: { dateOfBirth: true, gender: true, allergies: true, chronicConditions: true }
@@ -55,10 +98,14 @@ router.post('/ai-suggestions', authenticate, async (req: Request, res: Response)
 });
 
 // PUT /api/doctor/telemedicine - Update doctor's telemedicine availability
-router.put('/telemedicine', authenticate, async (req: Request, res: Response) => {
+router.put('/telemedicine', authenticate, doctorsOnly, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
-    const { telemedicineAvailable, telemedicineStartTime, telemedicineEndTime } = req.body;
+    const parsed = telemedicineSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: 'Invalid telemedicine settings', errors: parsed.error.flatten().fieldErrors });
+    }
+    const { telemedicineAvailable, telemedicineStartTime, telemedicineEndTime } = parsed.data;
 
     const staff = await prisma.staff.findUnique({
       where: { userId }
@@ -85,7 +132,7 @@ router.put('/telemedicine', authenticate, async (req: Request, res: Response) =>
 });
 
 // GET /api/doctor/telemedicine - Get doctor's telemedicine availability
-router.get('/telemedicine', authenticate, async (req: Request, res: Response) => {
+router.get('/telemedicine', authenticate, doctorsOnly, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.id;
 

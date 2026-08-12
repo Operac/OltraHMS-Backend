@@ -42,18 +42,27 @@ const decryptSecret = (encryptedSecret: string): string => {
 };
 
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  firstName: z.string(),
-  lastName: z.string(),
-  phone: z.string().optional(),
-  gender: z.nativeEnum(Gender).optional(),
-  dateOfBirth: z.string().optional(),
+  email: z.string().trim().email().max(255).toLowerCase(),
+  password: z.string()
+    .min(12, 'Password must contain at least 12 characters')
+    .max(128)
+    .regex(/[a-z]/, 'Password must contain a lowercase letter')
+    .regex(/[A-Z]/, 'Password must contain an uppercase letter')
+    .regex(/\d/, 'Password must contain a number')
+    .regex(/[^A-Za-z0-9]/, 'Password must contain a special character'),
+  firstName: z.string().trim().min(2).max(100),
+  lastName: z.string().trim().min(2).max(100),
+  phone: z.string().trim().min(7).max(20),
+  gender: z.nativeEnum(Gender),
+  dateOfBirth: z.string().date().refine((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isFinite(date.getTime()) && date <= new Date();
+  }, 'Date of birth must be a valid date in the past'),
 });
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { email, password, firstName, lastName } = registerSchema.parse(req.body);
+    const { email, password, firstName, lastName, phone, gender, dateOfBirth } = registerSchema.parse(req.body);
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -62,32 +71,33 @@ export const register = async (req: Request, res: Response) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash: hashedPassword,
-        firstName,
-        lastName,
-        role: Role.PATIENT,
-        status: Status.ACTIVE,
-      },
-    });
+    const patientNumber = `HMS-${new Date().getFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
+    const user = await prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          email,
+          passwordHash: hashedPassword,
+          firstName,
+          lastName,
+          role: Role.PATIENT,
+          status: Status.ACTIVE,
+        },
+      });
 
-    if (user.role === Role.PATIENT) {
-        const patientNumber = `HMS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-        
-        await prisma.patient.create({
+      await tx.patient.create({
             data: {
-                userId: user.id,
-                firstName: user.firstName || '',
-                lastName: user.lastName || '',
+                userId: createdUser.id,
+                firstName,
+                lastName,
                 patientNumber,
-                dateOfBirth: new Date(req.body.dateOfBirth || new Date().toISOString()),
-                gender: req.body.gender as Gender || Gender.OTHER,
-                phone: req.body.phone || '000-000-0000',
+                dateOfBirth: new Date(`${dateOfBirth}T00:00:00.000Z`),
+                gender,
+                phone,
             }
-        });
-    }
+      });
+
+      return createdUser;
+    });
 
     // FIX: wrap email and audit in try/catch so they never kill registration
     // if email service is down or misconfigured, user still gets their token
@@ -121,8 +131,6 @@ export const register = async (req: Request, res: Response) => {
         { expiresIn: '7d' }
     );
 
-    const staff = await prisma.staff.findUnique({ where: { userId: user.id } });
-
     res.status(201).json({ 
       token, 
       refreshToken, 
@@ -131,12 +139,14 @@ export const register = async (req: Request, res: Response) => {
         email: user.email, 
         role: user.role, 
         firstName: user.firstName,
-        lastName: user.lastName,
-        staffId: staff?.id 
+        lastName: user.lastName
       } 
     });
   } catch (error) {
     console.error('Registration error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid registration details', errors: error.flatten().fieldErrors });
+    }
     res.status(500).json({ message: 'Registration failed' });
   }
 };

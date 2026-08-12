@@ -30,7 +30,7 @@
     "axios": "^1.13.4",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.40.1",
-    "cloudinary": "^1.41.3",
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.5",
     "date-fns": "^4.1.0",
     "dotenv": "^16.4.7",
@@ -43,8 +43,7 @@
     "jsonwebtoken": "^9.0.3",
     "lodash": "^4.17.23",
     "multer": "^2.0.2",
-    "multer-storage-cloudinary": "^4.0.0",
-    "nodemailer": "^7.0.12",
+    "nodemailer": "^9.0.5",
     "otplib": "^10.2.3",
     "pdfkit": "^0.17.2",
     "prisma": "^5.21.0",
@@ -53,11 +52,11 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@vitest/ui": "^2.1.9",
+    "@vitest/ui": "^4.1.10",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.10"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

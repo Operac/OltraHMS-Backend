@@ -3,6 +3,10 @@ import axios from 'axios';
 import { prisma } from '../src/lib/prisma';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000/api';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 async function testHRFlow() {
     console.log('🛡️ Starting HR & Payroll Flow Verification...');
@@ -12,7 +16,7 @@ async function testHRFlow() {
         console.log('🔑 Logging in as Admin...');
         const adminLogin = await axios.post(`${API_URL}/auth/login`, {
             email: 'admin@oltrahms.com',
-            password: 'OltraHMS@123'
+            password: TEST_PASSWORD
         });
         const adminToken = (adminLogin.data as any).token;
         const adminHeaders = { Authorization: `Bearer ${adminToken}` };
@@ -25,7 +29,7 @@ async function testHRFlow() {
             firstName: 'Test',
             lastName: 'Staff',
             email: staffEmail,
-            password: 'password123',
+            password: TEST_PASSWORD,
             role: 'NURSE',
             departmentId: null,
             specialization: 'General'
@@ -90,7 +94,7 @@ async function testHRFlow() {
         console.log('🔑 Logging in as Test Staff...');
         const staffLogin = await axios.post(`${API_URL}/auth/login`, {
             email: staffEmail,
-            password: 'password123'
+            password: TEST_PASSWORD
         });
         const staffToken = (staffLogin.data as any).token;
         const staffHeaders = { Authorization: `Bearer ${staffToken}` };

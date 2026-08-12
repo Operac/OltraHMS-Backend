@@ -9,6 +9,10 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const prisma = new PrismaClient();
 const API_URL = 'http://localhost:3000/api';
+const TEST_PASSWORD = process.env.TEST_PASSWORD;
+if (!TEST_PASSWORD || TEST_PASSWORD.length < 12) {
+    throw new Error('TEST_PASSWORD must be set and contain at least 12 characters');
+}
 
 async function verifyReceptionistFlow() {
     console.log('🏥 Starting Receptionist Flow Verification...');
@@ -25,7 +29,7 @@ async function verifyReceptionistFlow() {
         const receptionistEmail = 'recept_test@oltra.com';
         let receptionist = await prisma.user.findUnique({ where: { email: receptionistEmail } });
         if (!receptionist) {
-             const passwordHash = await bcrypt.hash('password123', 10);
+             const passwordHash = await bcrypt.hash(TEST_PASSWORD, 12);
              receptionist = await prisma.user.create({
                  data: {
                      email: receptionistEmail,
@@ -51,7 +55,7 @@ async function verifyReceptionistFlow() {
         let doctorStaff: any;
         
         if (!doctorUser) {
-             const passwordHash = await bcrypt.hash('password123', 10);
+             const passwordHash = await bcrypt.hash(TEST_PASSWORD, 12);
              const newUser = await prisma.user.create({
                  data: {
                      email: doctorEmail,
@@ -82,7 +86,7 @@ async function verifyReceptionistFlow() {
         // Login
         const loginRes = await axios.post(`${API_URL}/auth/login`, {
             email: receptionistEmail,
-            password: 'password123'
+            password: TEST_PASSWORD
         });
         receptionistToken = (loginRes.data as any).token;
         console.log('   - Receptionist Logged In');
