@@ -431,6 +431,100 @@ export const getPatientProfile = async (req: AuthRequest, res: Response) => {
     }
 };
 
+// Staff-facing update of a patient record by id (Admin, Receptionist, Doctor, Nurse)
+const updatePatientByIdSchema = z.object({
+    firstName: z.string().min(2).optional(),
+    lastName: z.string().min(2).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().min(10).optional(),
+    address: z.string().optional(),
+    dateOfBirth: z.string().or(z.date()).optional(),
+    gender: z.nativeEnum(Gender).optional(),
+    bloodGroup: z.string().optional(),
+    genotype: z.string().optional(),
+    emergencyContact: z.any().optional(),
+});
+
+export const updatePatientById = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        if (!id) return res.status(400).json({ message: 'Patient ID is required' });
+
+        const data = updatePatientByIdSchema.parse(req.body);
+
+        const existingPatient = await prisma.patient.findUnique({
+            where: { id: id as string },
+            select: { id: true, userId: true }
+        });
+        if (!existingPatient) return res.status(404).json({ message: 'Patient not found' });
+
+        // Validate genotype / bloodGroup enums, treating blanks as "no change"
+        const validGenotypes = ['AA', 'AS', 'SS', 'AC', 'SC'];
+        const sanitizedGenotype = data.genotype && validGenotypes.includes(data.genotype.toUpperCase())
+            ? data.genotype.toUpperCase()
+            : undefined;
+
+        const validBloodGroups = ['A_POSITIVE', 'A_NEGATIVE', 'B_POSITIVE', 'B_NEGATIVE', 'AB_POSITIVE', 'AB_NEGATIVE', 'O_POSITIVE', 'O_NEGATIVE'];
+        const sanitizedBloodGroup = data.bloodGroup && validBloodGroups.includes(data.bloodGroup.toUpperCase())
+            ? data.bloodGroup.toUpperCase()
+            : undefined;
+
+        // Uniqueness checks (exclude this patient / its user)
+        if (data.email && existingPatient.userId) {
+            const conflictingEmail = await prisma.user.findFirst({
+                where: { email: data.email, isDeleted: false, id: { not: existingPatient.userId } }
+            });
+            if (conflictingEmail) return res.status(400).json({ message: 'Email already in use by another user' });
+        }
+
+        if (data.phone) {
+            const conflictingPhone = await prisma.patient.findFirst({
+                where: { phone: data.phone, isDeleted: false, id: { not: existingPatient.id } }
+            });
+            if (conflictingPhone) return res.status(400).json({ message: 'Phone number already in use by another patient' });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            // Keep the linked user account in sync (name/email) when present
+            if (existingPatient.userId && (data.firstName !== undefined || data.lastName !== undefined || data.email !== undefined)) {
+                const userData: any = {};
+                if (data.firstName !== undefined) userData.firstName = data.firstName;
+                if (data.lastName !== undefined) userData.lastName = data.lastName;
+                if (data.email !== undefined) userData.email = data.email;
+                await tx.user.update({ where: { id: existingPatient.userId }, data: userData });
+            }
+
+            const patientData: any = {};
+            if (data.firstName !== undefined) patientData.firstName = data.firstName;
+            if (data.lastName !== undefined) patientData.lastName = data.lastName;
+            if (data.phone !== undefined) patientData.phone = data.phone;
+            if (data.address !== undefined) patientData.address = data.address;
+            if (data.dateOfBirth !== undefined) patientData.dateOfBirth = new Date(data.dateOfBirth);
+            if (data.gender !== undefined) patientData.gender = data.gender;
+            if (sanitizedBloodGroup) patientData.bloodGroup = sanitizedBloodGroup;
+            if (sanitizedGenotype) patientData.genotype = sanitizedGenotype;
+            if (data.emergencyContact !== undefined) patientData.emergencyContact = data.emergencyContact;
+
+            await tx.patient.update({ where: { id: existingPatient.id }, data: patientData });
+        });
+
+        const updatedPatient = await prisma.patient.findUnique({
+            where: { id: existingPatient.id },
+            include: { user: { select: { email: true, status: true } } }
+        });
+
+        await logAudit(req.user?.id || 'SYSTEM', 'UPDATE_PATIENT', `Updated patient ${updatedPatient?.patientNumber}`, req.ip || 'unknown');
+
+        res.json({ message: 'Patient updated successfully', patient: updatedPatient });
+    } catch (error: any) {
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ message: 'Validation failed', errors: error.issues });
+        }
+        console.error('Update Patient Error:', error);
+        res.status(500).json({ message: 'Failed to update patient' });
+    }
+};
+
 export const getMedicationSchedule = async (req: AuthRequest, res: Response) => {
     try {
         const userId = req.user?.id;

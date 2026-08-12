@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createPatient, getPatients, getPatientById, getDashboardStats, getPatientProfile, updatePatientProfile, getMedicationSchedule } from '../controllers/patient.controller';
+import { createPatient, getPatients, getPatientById, getDashboardStats, getPatientProfile, updatePatientProfile, getMedicationSchedule, updatePatientById } from '../controllers/patient.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { Role } from '@prisma/client';
 
@@ -24,5 +24,8 @@ router.post('/', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR, Role.NUR
 
 // Details: All staff - MUST come AFTER specific routes like /profile/me
 router.get('/:id', authorize([Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.RECEPTIONIST]) as any, getPatientById as any);
+
+// Update patient by id: Admin, Receptionist, Doctor, Nurse
+router.patch('/:id', authorize([Role.ADMIN, Role.RECEPTIONIST, Role.DOCTOR, Role.NURSE]) as any, updatePatientById as any);
 
 export default router;
